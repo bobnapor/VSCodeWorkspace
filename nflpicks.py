@@ -31,7 +31,7 @@ local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
 #TODO: figure out how to add to the dicts in here for the defensive stats
-year_stats = dict(dict(dict()))
+year_stats = dict()
 column_names = []
 
 for year in range(2009, 2020):
