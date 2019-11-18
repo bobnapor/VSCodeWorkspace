@@ -30,6 +30,7 @@ local_games_template = 'yyyy_weekly_schedule.html'
 local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
+#TODO: figure out how to add to the dicts in here for the defensive stats
 year_stats = dict(dict(dict()))
 column_names = []
 
