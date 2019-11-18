@@ -30,9 +30,6 @@ local_games_template = 'yyyy_weekly_schedule.html'
 local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
-[k,v]:
-off and def = [year, [team, [stat1, stat2, stat3,...]]]
-
 year_stats = dict(dict(dict()))
 column_names = []
 
@@ -41,73 +38,29 @@ for year in range(2009, 2020):
     #local_def_url = file_dir + local_def_template.replace('yyyy', str(year))
     #local_games_url = file_dir + local_games_template.replace('yyyy', str(year))
 
+    single_year_stats = dict()
     local_off_file = open(local_off_url)
     local_off_soup = BeautifulSoup(local_off_file.read(), 'html.parser')
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+    for comment in local_off_soup.find_all(string=lambda text: isinstance(text, Comment)):
         off_stats_soup = BeautifulSoup(comment.string, 'html.parser')
-        off_stats_table = off_stats_soup.find_all('table', id='team_stats')[0]
-        off_stats_rows = off_stats_table.find_all('tbody')[0].find_all('tr')
-        num_teams = 0
-        for off_stats_row in off_stats_rows:
-            for off_stat_column in off_stats_row.find_all('td'):
-                year_stats[year][team][column_name] = off_stat_column.text #TODO: must do something like the below i think
-                #column_name = value_column['data-stat']
-                #    if column_name not in year_stats[]:
-                #        year_stats[column_name] = [value_column.text]
-                #        column_names.append(column_name)
-                #    else:
-                #        year_stats[column_name].append(value_column.text)
-                print('Extracted data for the ' + year + ' ' + one_year_stats['team'][num_teams])
-                num_teams += 1
+        off_stats_tables = off_stats_soup.find_all('table', id='team_stats')
+        if len(off_stats_tables) < 1:
+            continue
+        else:
+            off_stats_table = off_stats_tables[0]
+            off_stats_rows = off_stats_table.find_all('tbody')[0].find_all('tr')
 
+            for off_stats_row in off_stats_rows:
+                single_team_stats = dict()
+                for off_stat_column in off_stats_row.find_all('td'):
+                    column_name = off_stat_column['data-stat']
+                    single_team_stats[column_name] = off_stat_column.text
+                team = single_team_stats['team']
+                single_year_stats[team] = single_team_stats
+                print('Extracted data for the ' + str(year) + ' ' + team)
 
-    #local_def_file = open(local_def_url)
-    #local_def_soup = BeautifulSoup(local_def_file.read(), 'html.parser')
+    year_stats[year] = single_year_stats
 
-    #local_games_file = open(local_games_url)
-    #local_games_soup = BeautifulSoup(local_games_file.read(), 'html.parser')
-    #games_table = local_games_soup.find_all('table', id='games')
-
-    print(one_year_stats)
-
-
-
-#i need two arrs for games 1-n
-    #x_input = [input_stats_1, input_stats_2, ... , input_stats_n]
-    #y_input = [points_1, points_2, ... , points_n]
-
-#TODO: indent section below to run once per year
-#TODO: need to collect aggregated stats per year per team, as well as values for defenses they played each game and their score for that game
-#x inputs will be year stats of team + def stats of opp team per game
-#y inputs will be points scored by that team in that game
-#comments = soup.find_all(string=lambda text: isinstance(text, Comment))
-#for comment in comments:
-#    table_soup = BeautifulSoup(comment.string, 'html.parser')
-#    tables = table_soup.find_all('table', id='team_stats')
-#    if len(tables) > 0:
-#        team_stats_table = tables[0]
-#
-#        one_year_stats = dict()
-#        column_names = []
-#
-#        tbodies = team_stats_table.find_all('tbody')
-#        if len(tbodies) > 0:
-#            tbody = tbodies[0]
-#            body_rows = tbody.find_all('tr')
-#            if len(body_rows) > 0:
-#                num_teams = 0
-#                for body_row in body_rows:
-#                    #print(body_row.prettify())
-#                    value_columns = body_row.find_all('td')
-#                    for value_column in value_columns:
-#                        column_name = value_column['data-stat']
-#                        if column_name not in one_year_stats:
-#                            one_year_stats[column_name] = [value_column.text]
-#                            column_names.append(column_name)
-#                        else:
-#                            one_year_stats[column_name].append(value_column.text)
-#                    print('Extracted data for ' + one_year_stats['team'][num_teams])
-#                    num_teams += 1
-
+print(year_stats)
 
 print('Completed!')
