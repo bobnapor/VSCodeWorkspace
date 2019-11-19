@@ -77,19 +77,27 @@ for year in range(2009, 2020):
     local_games_file = open(local_games_url)
     local_games_soup = BeautifulSoup(local_games_file.read(), 'html.parser')
     games_table = local_games_soup.find_all('table', id='games')[0]
+    game_counter = 0
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
+        if game_counter == 256:
+            continue
+
         winner_inputs = []
         loser_inputs = []
         single_game = dict()
 
-        for game_stat_column in game_row.find_all('td'):
+        game_stat_columns = game_row.find_all('td')
+
+        if len(game_stat_columns) < 1:
+            continue
+        
+        game_counter += 1
+
+        for game_stat_column in game_stat_columns:
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        try:
-            winner = single_game['winner']
-        except:
-            print('here') #TODO: single_game is somehow empty..continue debugging
+        winner = single_game['winner']
         winner_stats = single_year_stats[winner]
         for (stat_name, stat_value) in winner_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
