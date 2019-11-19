@@ -59,7 +59,6 @@ for year in range(2009, 2020):
                 single_year_stats[team] = single_team_stats
                 print('Extracted data for the ' + str(year) + ' ' + team)
 
-    #TODO: single_year_stats[team][<def stat column>] = <stat>
     local_def_file = open(local_def_url)
     local_def_soup = BeautifulSoup(local_def_file.read(), 'html.parser')
     def_stats_table = local_def_soup.find_all('table', id='team_stats')[0]
@@ -69,7 +68,7 @@ for year in range(2009, 2020):
             column_name = 'def_' + def_stat_column['data-stat']
             single_team_stats_def[column_name] = def_stat_column.text
         team = single_team_stats_def['def_team']
-        for def_stat_key in single_team_stats_def: #right way to loop through keys?
+        for def_stat_key in single_team_stats_def:
             single_year_stats[team][def_stat_key] = single_team_stats_def[def_stat_key]
 
     year_stats[year] = single_year_stats
