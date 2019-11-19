@@ -34,10 +34,13 @@ local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.c
 year_stats = dict()
 column_names = []
 
+x_input = []
+y_input = []
+
 for year in range(2009, 2020):
     local_off_url = file_dir + local_off_template.replace('yyyy', str(year))
     local_def_url = file_dir + local_def_template.replace('yyyy', str(year))
-    #local_games_url = file_dir + local_games_template.replace('yyyy', str(year))
+    local_games_url = file_dir + local_games_template.replace('yyyy', str(year))
 
     single_year_stats = dict()
     local_off_file = open(local_off_url)
@@ -53,6 +56,7 @@ for year in range(2009, 2020):
             for off_stats_row in off_stats_rows:
                 single_team_stats = dict()
                 for off_stat_column in off_stats_row.find_all('td'):
+                    #TODO: if column name not present in dictionary yet, place it in column_names
                     column_name = off_stat_column['data-stat']
                     single_team_stats[column_name] = off_stat_column.text
                 team = single_team_stats['team']
@@ -70,6 +74,23 @@ for year in range(2009, 2020):
         team = single_team_stats_def['def_team']
         for def_stat_key in single_team_stats_def:
             single_year_stats[team][def_stat_key] = single_team_stats_def[def_stat_key]
+
+    local_games_file = open(local_games_url)
+    local_games_soup = BeautifulSoup(local_games_file.read(), 'html.parser')
+    games_table = local_Games_soup.find_all('table', id='games')[0]
+    for games_row in games_table.find_all('tbody')[0].find_all('tr'):
+        loser_inputs = []
+        winner_inputs = []
+        #put offense and defensive stats from single_year_stats into winner/loser_inputs
+        x_input.append(loser_inputs)
+        y_input.append(loser score)
+        x_input.append(winner_inputs)
+        y_input.append(winner score)
+
+        #data-stat = 'winner'
+        #data-stat = 'loser'
+        #data-stat = 'pts_win'
+        #data-stat = 'pts_lose'
 
     year_stats[year] = single_year_stats
 
