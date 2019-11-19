@@ -30,8 +30,8 @@ local_games_template = 'yyyy_weekly_schedule.html'
 local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
-year_stats = dict()
-column_names = []
+#year_stats = dict()
+#column_names = []
 
 x_input = []
 y_input = []
@@ -86,7 +86,10 @@ for year in range(2009, 2020):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        winner = single_game['winner']
+        try:
+            winner = single_game['winner']
+        except:
+            print('here') #TODO: single_game is somehow empty..continue debugging
         winner_stats = single_year_stats[winner]
         for (stat_name, stat_value) in winner_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
@@ -107,8 +110,14 @@ for year in range(2009, 2020):
         x_input.append(loser_inputs)
         y_input.append(loser_score)
 
-    year_stats[year] = single_year_stats
+    #year_stats[year] = single_year_stats
 
+x, y = np.array(x_input), np.array(y_input)
+model = LinearRegression().fit(x, y)
 
-print(year_stats)
+r_sq = model.score(x, y)
+print('coefficient of determination:', r_sq)
+print('intercept:', model.intercept_)
+print('slope:', model.coef_)
+
 print('Completed!')
