@@ -30,7 +30,6 @@ local_games_template = 'yyyy_weekly_schedule.html'
 local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
-#TODO: figure out how to add to the dicts in here for the defensive stats
 year_stats = dict()
 column_names = []
 
@@ -77,24 +76,38 @@ for year in range(2009, 2020):
 
     local_games_file = open(local_games_url)
     local_games_soup = BeautifulSoup(local_games_file.read(), 'html.parser')
-    games_table = local_Games_soup.find_all('table', id='games')[0]
-    for games_row in games_table.find_all('tbody')[0].find_all('tr'):
-        loser_inputs = []
+    games_table = local_games_soup.find_all('table', id='games')[0]
+    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
         winner_inputs = []
-        #put offense and defensive stats from single_year_stats into winner/loser_inputs
-        x_input.append(loser_inputs)
-        y_input.append(loser score)
-        x_input.append(winner_inputs)
-        y_input.append(winner score)
+        loser_inputs = []
+        single_game = dict()
 
-        #data-stat = 'winner'
-        #data-stat = 'loser'
-        #data-stat = 'pts_win'
-        #data-stat = 'pts_lose'
+        for game_stat_column in game_row.find_all('td'):
+            game_column_name = game_stat_column['data-stat']
+            single_game[game_column_name] = game_stat_column.text
+
+        winner = single_game['winner']
+        winner_stats = single_year_stats[winner]
+        for (stat_name, stat_value) in winner_stats.items():
+            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+            if checkable_stat.isdigit():
+                winner_inputs.append(float(stat_value))
+
+        loser = single_game['loser']
+        loser_stats = single_year_stats[loser]
+        for (stat_name, stat_value) in loser_stats.items():
+            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+            if checkable_stat.isdigit():
+                loser_inputs.append(float(stat_value))
+
+        winner_score = int(single_game['pts_win'])
+        loser_score = int(single_game['pts_lose'])
+        x_input.append(winner_inputs)
+        y_input.append(winner_score)
+        x_input.append(loser_inputs)
+        y_input.append(loser_score)
 
     year_stats[year] = single_year_stats
-
-
 
 
 print(year_stats)
