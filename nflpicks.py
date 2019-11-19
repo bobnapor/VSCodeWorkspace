@@ -97,6 +97,7 @@ for year in range(2009, 2020):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
+        #TODO: add def stats of winner to loser stats and def stats of loser to winner stats
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
         for (stat_name, stat_value) in winner_stats.items():
@@ -111,7 +112,11 @@ for year in range(2009, 2020):
             if checkable_stat.isdigit():
                 loser_inputs.append(float(stat_value))
 
-        winner_score = int(single_game['pts_win'])
+        #TODO: fails when game has not happened yet - need to omit these
+        try:
+            winner_score = int(single_game['pts_win'])
+        except:
+            print('damnit')
         loser_score = int(single_game['pts_lose'])
         x_input.append(winner_inputs)
         y_input.append(winner_score)
