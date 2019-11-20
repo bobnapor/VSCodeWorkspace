@@ -36,6 +36,33 @@ local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.c
 x_input = []
 y_input = []
 
+stat_names_to_use = {
+    'points',
+    'yds_per_play_offense',
+    'fumbles_lost',
+    'first_down',
+    'pass_yds',
+    'pass_int',
+    'pass_net_yds_per_att',
+    'rush_yds',
+    'rush_yds_per_att',
+    'penalties',
+    'score_pct',
+    'turnover_pct',
+    'def_points',
+    'def_yds_per_play_offense',
+    'def_fumbles_lost',
+    'def_first_down',
+    'def_pass_yds',
+    'def_pass_int',
+    'def_pass_net_yds_per_att',
+    'def_rush_yds',
+    'def_rush_yds_per_att',
+    'def_penalties',
+    'def_score_pct',
+    'def_turnover_pct'
+}
+
 for year in range(2009, 2020):
     local_off_url = file_dir + local_off_template.replace('yyyy', str(year))
     local_def_url = file_dir + local_def_template.replace('yyyy', str(year))
@@ -105,14 +132,15 @@ for year in range(2009, 2020):
         winner_stats = single_year_stats[winner]
         for (stat_name, stat_value) in winner_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit():
+            if checkable_stat.isdigit() and stat_name in stat_names_to_use:  #stat_name != 'g' and stat_name != 'def_g':
                 winner_inputs.append(float(stat_value))
+                print(stat_name)
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
         for (stat_name, stat_value) in loser_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit():
+            if checkable_stat.isdigit() and stat_name in stat_names_to_use:  #stat_name != 'g' and stat_name != 'def_g':
                 loser_inputs.append(float(stat_value))
 
         temp_winner_inputs = winner_inputs.copy()
