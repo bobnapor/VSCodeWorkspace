@@ -133,15 +133,14 @@ for year in range(2009, 2020):
         for (stat_name, stat_value) in winner_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
             if checkable_stat.isdigit() and stat_name in stat_names_to_use:  #stat_name != 'g' and stat_name != 'def_g':
-                winner_inputs.append(float(stat_value))
-                print(stat_name)
+                winner_inputs.append(float(stat_value)/float(winner_stats['g']))
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
         for (stat_name, stat_value) in loser_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
             if checkable_stat.isdigit() and stat_name in stat_names_to_use:  #stat_name != 'g' and stat_name != 'def_g':
-                loser_inputs.append(float(stat_value))
+                loser_inputs.append(float(stat_value)/float(loser_stats['g']))
 
         temp_winner_inputs = winner_inputs.copy()
         winner_inputs.extend(loser_inputs)
@@ -151,6 +150,7 @@ for year in range(2009, 2020):
         loser_score = int(single_game['pts_lose'])
         x_input.append(winner_inputs)
         y_input.append(winner_score)
+        #y_input.append(winner_score-loser_score)
         x_input.append(loser_inputs)
         y_input.append(loser_score)
 
