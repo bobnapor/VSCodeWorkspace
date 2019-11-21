@@ -30,13 +30,13 @@ local_games_template = 'yyyy_weekly_schedule.html'
 local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
-#year_stats = dict()
+year_stats = dict()
 #column_names = []
 
 x_input = []
 y_input = []
 
-stat_names_to_use = {
+off_stat_names_to_use = {
     'points',
     'yds_per_play_offense',
     'fumbles_lost',
@@ -48,7 +48,10 @@ stat_names_to_use = {
     'rush_yds_per_att',
     'penalties',
     'score_pct',
-    'turnover_pct',
+    'turnover_pct'
+}
+
+def_stat_names_to_use = {
     'def_points',
     'def_yds_per_play_offense',
     'def_fumbles_lost',
@@ -109,8 +112,10 @@ for year in range(2009, 2020):
         if game_counter == 256:
             continue
 
-        winner_inputs = []
-        loser_inputs = []
+        winner_off_inputs = []
+        winner_def_inputs = []
+        loser_off_inputs = []
+        loser_def_inputs = []
         single_game = dict()
 
         game_stat_columns = game_row.find_all('td')
@@ -127,24 +132,30 @@ for year in range(2009, 2020):
         if single_game['boxscore_word'] == 'preview':
             continue
 
-        #TODO: add stats of winner to loser stats and def stats of loser to winner stats
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
         for (stat_name, stat_value) in winner_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit() and stat_name in stat_names_to_use:  #stat_name != 'g' and stat_name != 'def_g':
-                winner_inputs.append(float(stat_value)/float(winner_stats['g']))
+            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+                winner_off_inputs.append(float(stat_value)/float(winner_stats['g']))
+            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+                winner_def_inputs.append(float(stat_value)/float(winner_stats['g']))
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
         for (stat_name, stat_value) in loser_stats.items():
             checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit() and stat_name in stat_names_to_use:  #stat_name != 'g' and stat_name != 'def_g':
-                loser_inputs.append(float(stat_value)/float(loser_stats['g']))
+            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+                loser_off_inputs.append(float(stat_value)/float(loser_stats['g']))
+            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+                loser_def_inputs.append(float(stat_value)/float(loser_stats['g']))
 
-        temp_winner_inputs = winner_inputs.copy()
-        winner_inputs.extend(loser_inputs)
-        loser_inputs.extend(temp_winner_inputs)
+        winner_inputs = []
+        loser_inputs = []
+        winner_inputs.extend(winner_off_inputs)
+        winner_inputs.extend(loser_def_inputs)
+        loser_inputs.extend(loser_off_inputs)
+        loser_inputs.extend(winner_def_inputs)
 
         winner_score = int(single_game['pts_win'])
         loser_score = int(single_game['pts_lose'])
@@ -154,7 +165,7 @@ for year in range(2009, 2020):
         x_input.append(loser_inputs)
         y_input.append(loser_score)
 
-    #year_stats[year] = single_year_stats
+    year_stats[year] = single_year_stats
 
 x, y = np.array(x_input), np.array(y_input)
 model = LinearRegression().fit(x, y)
@@ -163,5 +174,39 @@ r_sq = model.score(x, y)
 print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
+
+
+colts_2019 = year_stats[2019]['Indianapolis Colts']
+texans_2019 = year_stats[2019]['Houston Texans']
+
+colts_off_inputs = []
+colts_def_inputs = []
+for (stat_name, stat_value) in colts_2019.items():
+    checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+    if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+        colts_off_inputs.append(float(stat_value)/float(colts_2019['g']))
+    if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+        colts_def_inputs.append(float(stat_value)/float(colts_2019['g']))
+
+texans_off_inputs = []
+texans_def_inputs = []
+for (stat_name, stat_value) in texans_2019.items():
+    checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+    if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+        texans_off_inputs.append(float(stat_value)/float(texans_2019['g']))
+    if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+        texans_def_inputs.append(float(stat_value)/float(texans_2019['g']))
+
+colts_off_inputs.extend(texans_def_inputs)
+texans_off_inputs.extend(colts_def_inputs)
+colts_inputs = []
+texans_inputs = []
+colts_inputs.append(colts_off_inputs)
+texans_inputs.append(texans_off_inputs)
+
+colts_pred = model.predict(colts_inputs)
+texans_pred = model.predict(texans_inputs)
+print('predicted colts score:', colts_pred, sep='\n')
+print('predicted texans score:', texans_pred, sep='\n')
 
 print('Completed!')
