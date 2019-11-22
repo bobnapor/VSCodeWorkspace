@@ -175,38 +175,64 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
+future_games_url = file_dir + local_games_template.replace('yyyy', '2019')
+future_games_file = open(future_games_url)
+future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
+games_table = local_games_soup.find_all('table', id='games')[0]
+game_counter = 0
+for game_row in games_table.find_all('tbody')[0].find_all('tr'):
 
-colts_2019 = year_stats[2019]['Indianapolis Colts']
-texans_2019 = year_stats[2019]['Houston Texans']
+    week_num = game_row.find_all('th')[0].text
 
-colts_off_inputs = []
-colts_def_inputs = []
-for (stat_name, stat_value) in colts_2019.items():
-    checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-    if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-        colts_off_inputs.append(float(stat_value)/float(colts_2019['g']))
-    if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-        colts_def_inputs.append(float(stat_value)/float(colts_2019['g']))
+    if week_num != '12':
+        continue
+    else:
+        team1_off_inputs = []
+        team1_def_inputs = []
+        team2_off_inputs = []
+        team2_def_inputs = []
+        game_to_predict = dict()
 
-texans_off_inputs = []
-texans_def_inputs = []
-for (stat_name, stat_value) in texans_2019.items():
-    checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-    if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-        texans_off_inputs.append(float(stat_value)/float(texans_2019['g']))
-    if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-        texans_def_inputs.append(float(stat_value)/float(texans_2019['g']))
+        game_stat_columns = game_row.find_all('td')
 
-colts_off_inputs.extend(texans_def_inputs)
-texans_off_inputs.extend(colts_def_inputs)
-colts_inputs = []
-texans_inputs = []
-colts_inputs.append(colts_off_inputs)
-texans_inputs.append(texans_off_inputs)
+        if len(game_stat_columns) < 1:
+            continue
 
-colts_pred = model.predict(colts_inputs)
-texans_pred = model.predict(texans_inputs)
-print('predicted colts score:', colts_pred, sep='\n')
-print('predicted texans score:', texans_pred, sep='\n')
+        for game_stat_column in game_stat_columns:
+            game_column_name = game_stat_column['data-stat']
+            single_game[game_column_name] = game_stat_column.text
+
+        team1 = single_game['winner']
+        team2 = single_game['loser']
+        team1_year_stats = year_stats[2019][team1]
+        team2_year_stats = year_stats[2019][team2]
+
+        for (stat_name, stat_value) in team1_year_stats.items():
+            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+                team1_off_inputs.append(float(stat_value)/float(team1_year_stats['g']))
+            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+                team1_def_inputs.append(float(stat_value)/float(team1_year_stats['g']))
+
+        for (stat_name, stat_value) in team2_year_stats.items():
+            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+                team2_off_inputs.append(float(stat_value)/float(team2_year_stats['g']))
+            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+                team2_def_inputs.append(float(stat_value)/float(team2_year_stats['g']))
+
+        team1_off_inputs.extend(team2_def_inputs)
+        team2_off_inputs.extend(team1_def_inputs)
+        team1_inputs = []
+        team2_inputs = []
+        team1_inputs.append(team1_off_inputs)
+        team2_inputs.append(team2_off_inputs)
+
+        team1_pred = model.predict(team1_inputs)
+        team2_pred = model.predict(team2_inputs)
+        print('team:', team1, '; predicted score:', team1_pred)
+        print('team:', team2, '; predicted score:', team2_pred)
+        print('\n')
+
 
 print('Completed!')
