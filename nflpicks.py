@@ -1,4 +1,3 @@
-#import pandas as pd
 import numpy as np
 #import requests
 from bs4 import BeautifulSoup
@@ -18,12 +17,6 @@ url_template = 'https://www.pro-football-reference.com/years/yyyy/'
 #    print(year_req.status_code)
 #    year_soup = BeautifulSoup(year_req.content, 'html.parser')
 #    print(year_soup.prettify())
-
-#for testing
-#local_url = 'C:/Users/bobna/Downloads/2019_nfl_stats.html'  #for testing
-#page = open(local_url)                                      #for testing
-#soup = BeautifulSoup(page.read(), 'html.parser')            #for testing
-
 
 file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
 local_games_template = 'yyyy_weekly_schedule.html'
@@ -175,64 +168,68 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-future_games_url = file_dir + local_games_template.replace('yyyy', '2019')
-future_games_file = open(future_games_url)
-future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
-games_table = local_games_soup.find_all('table', id='games')[0]
-game_counter = 0
-for game_row in games_table.find_all('tbody')[0].find_all('tr'):
 
-    week_num = game_row.find_all('th')[0].text
+def predict_weekly_scores(linear_regression_model, week_num_target):
+    future_games_url = file_dir + local_games_template.replace('yyyy', '2019')
+    future_games_file = open(future_games_url)
+    future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
+    games_table = future_games_soup.find_all('table', id='games')[0]
+    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
 
-    if week_num != '12':
-        continue
-    else:
-        team1_off_inputs = []
-        team1_def_inputs = []
-        team2_off_inputs = []
-        team2_def_inputs = []
-        game_to_predict = dict()
+        week_num = game_row.find_all('th')[0].text
 
-        game_stat_columns = game_row.find_all('td')
-
-        if len(game_stat_columns) < 1:
+        if week_num != week_num_target:
             continue
+        else:
+            team1_off_inputs = []
+            team1_def_inputs = []
+            team2_off_inputs = []
+            team2_def_inputs = []
+            game_to_predict = dict()
 
-        for game_stat_column in game_stat_columns:
-            game_column_name = game_stat_column['data-stat']
-            single_game[game_column_name] = game_stat_column.text
+            game_stat_columns = game_row.find_all('td')
 
-        team1 = single_game['winner']
-        team2 = single_game['loser']
-        team1_year_stats = year_stats[2019][team1]
-        team2_year_stats = year_stats[2019][team2]
+            if len(game_stat_columns) < 1:
+                continue
 
-        for (stat_name, stat_value) in team1_year_stats.items():
-            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-                team1_off_inputs.append(float(stat_value)/float(team1_year_stats['g']))
-            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-                team1_def_inputs.append(float(stat_value)/float(team1_year_stats['g']))
+            for game_stat_column in game_stat_columns:
+                game_column_name = game_stat_column['data-stat']
+                game_to_predict[game_column_name] = game_stat_column.text
 
-        for (stat_name, stat_value) in team2_year_stats.items():
-            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-                team2_off_inputs.append(float(stat_value)/float(team2_year_stats['g']))
-            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-                team2_def_inputs.append(float(stat_value)/float(team2_year_stats['g']))
+            team1 = game_to_predict['winner']
+            team2 = game_to_predict['loser']
+            team1_year_stats = year_stats[2019][team1]
+            team2_year_stats = year_stats[2019][team2]
 
-        team1_off_inputs.extend(team2_def_inputs)
-        team2_off_inputs.extend(team1_def_inputs)
-        team1_inputs = []
-        team2_inputs = []
-        team1_inputs.append(team1_off_inputs)
-        team2_inputs.append(team2_off_inputs)
+            for (stat_name, stat_value) in team1_year_stats.items():
+                checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+                if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+                    team1_off_inputs.append(float(stat_value)/float(team1_year_stats['g']))
+                if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+                    team1_def_inputs.append(float(stat_value)/float(team1_year_stats['g']))
 
-        team1_pred = model.predict(team1_inputs)
-        team2_pred = model.predict(team2_inputs)
-        print('team:', team1, '; predicted score:', team1_pred)
-        print('team:', team2, '; predicted score:', team2_pred)
-        print('\n')
+            for (stat_name, stat_value) in team2_year_stats.items():
+                checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
+                if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
+                    team2_off_inputs.append(float(stat_value)/float(team2_year_stats['g']))
+                if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
+                    team2_def_inputs.append(float(stat_value)/float(team2_year_stats['g']))
+
+            team1_off_inputs.extend(team2_def_inputs)
+            team2_off_inputs.extend(team1_def_inputs)
+            team1_inputs = []
+            team2_inputs = []
+            team1_inputs.append(team1_off_inputs)
+            team2_inputs.append(team2_off_inputs)
+
+            team1_pred = linear_regression_model.predict(team1_inputs)
+            team2_pred = linear_regression_model.predict(team2_inputs)
+            print('team:', team1, '; predicted score:', team1_pred)
+            print('team:', team2, '; predicted score:', team2_pred)
+            print('\n')
+
+
+predict_weekly_scores(model, '13')
 
 
 print('Completed!')
