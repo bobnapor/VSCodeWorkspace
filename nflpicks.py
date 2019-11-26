@@ -24,7 +24,6 @@ local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-
 local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
 year_stats = dict()
-#column_names = []
 
 x_input = []
 y_input = []
@@ -59,6 +58,23 @@ def_stat_names_to_use = {
     'def_turnover_pct'
 }
 
+
+def strip_chars_from_stat(stat_to_alter):
+    return stat_to_alter.replace('-','').replace(' ', '').replace(',','').replace('.','')
+
+
+def populate_inputs(year_stats, off_inputs, def_inputs):
+    num_games_played = float(year_stats['g'])
+    for (stat_name, stat_value) in year_stats.items():
+        formatted_stat = strip_chars_from_stat(stat_value)
+        if formatted_stat.isdigit():
+            per_game_stat = float(stat_value)/num_games_played
+            if stat_name in off_stat_names_to_use:
+                off_inputs.append(per_game_stat)
+            elif stat_name in def_stat_names_to_use:
+                def_inputs.append(per_game_stat)
+
+
 for year in range(2009, 2020):
     local_off_url = file_dir + local_off_template.replace('yyyy', str(year))
     local_def_url = file_dir + local_def_template.replace('yyyy', str(year))
@@ -78,7 +94,6 @@ for year in range(2009, 2020):
             for off_stats_row in off_stats_rows:
                 single_team_stats = dict()
                 for off_stat_column in off_stats_row.find_all('td'):
-                    #TODO: if column name not present in dictionary yet, place it in column_names
                     column_name = off_stat_column['data-stat']
                     single_team_stats[column_name] = off_stat_column.text
                 team = single_team_stats['team']
@@ -127,21 +142,11 @@ for year in range(2009, 2020):
 
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
-        for (stat_name, stat_value) in winner_stats.items():
-            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-                winner_off_inputs.append(float(stat_value)/float(winner_stats['g']))
-            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-                winner_def_inputs.append(float(stat_value)/float(winner_stats['g']))
+        populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
-        for (stat_name, stat_value) in loser_stats.items():
-            checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-            if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-                loser_off_inputs.append(float(stat_value)/float(loser_stats['g']))
-            if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-                loser_def_inputs.append(float(stat_value)/float(loser_stats['g']))
+        populate_inputs(loser_stats, loser_off_inputs, loser_def_inputs)
 
         winner_inputs = []
         loser_inputs = []
@@ -154,7 +159,6 @@ for year in range(2009, 2020):
         loser_score = int(single_game['pts_lose'])
         x_input.append(winner_inputs)
         y_input.append(winner_score)
-        #y_input.append(winner_score-loser_score)
         x_input.append(loser_inputs)
         y_input.append(loser_score)
 
@@ -201,19 +205,8 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
             team1_year_stats = year_stats[2019][team1]
             team2_year_stats = year_stats[2019][team2]
 
-            for (stat_name, stat_value) in team1_year_stats.items():
-                checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-                if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-                    team1_off_inputs.append(float(stat_value)/float(team1_year_stats['g']))
-                if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-                    team1_def_inputs.append(float(stat_value)/float(team1_year_stats['g']))
-
-            for (stat_name, stat_value) in team2_year_stats.items():
-                checkable_stat = stat_value.replace('-','').replace(' ', '').replace(',','').replace('.','')
-                if checkable_stat.isdigit() and stat_name in off_stat_names_to_use:
-                    team2_off_inputs.append(float(stat_value)/float(team2_year_stats['g']))
-                if checkable_stat.isdigit() and stat_name in def_stat_names_to_use:
-                    team2_def_inputs.append(float(stat_value)/float(team2_year_stats['g']))
+            populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
+            populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
 
             team1_off_inputs.extend(team2_def_inputs)
             team2_off_inputs.extend(team1_def_inputs)
