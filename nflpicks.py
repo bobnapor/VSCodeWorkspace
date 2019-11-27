@@ -217,9 +217,7 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print('team:', team1, '; predicted score:', team1_pred)
-            print('team:', team2, '; predicted score:', team2_pred)
-            print('\n')
+            print(team1, ':', str(team1_pred[0]), ';', team2, ':', str(team2_pred[0]))
 
 
 predict_weekly_scores(model, '13')
