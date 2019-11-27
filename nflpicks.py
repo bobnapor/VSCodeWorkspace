@@ -2,6 +2,7 @@ import numpy as np
 #import requests
 from bs4 import BeautifulSoup
 from bs4 import Comment
+import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 
@@ -29,33 +30,33 @@ x_input = []
 y_input = []
 
 off_stat_names_to_use = {
-    'points',
-    'yds_per_play_offense',
-    'fumbles_lost',
-    'first_down',
-    'pass_yds',
-    'pass_int',
     'pass_net_yds_per_att',
-    'rush_yds',
+    'pass_td',
+    'penalties_yds',
+    'points',
+    'rush_att',
+    'rush_td',
     'rush_yds_per_att',
-    'penalties',
     'score_pct',
-    'turnover_pct'
+    'turnover_pct',
+    'yds_per_play_offense'
 }
 
 def_stat_names_to_use = {
-    'def_points',
-    'def_yds_per_play_offense',
     'def_fumbles_lost',
-    'def_first_down',
-    'def_pass_yds',
+    'def_pass_att',
     'def_pass_int',
     'def_pass_net_yds_per_att',
-    'def_rush_yds',
-    'def_rush_yds_per_att',
+    'def_pass_td',
     'def_penalties',
+    'def_plays_offense',
+    'def_points',
+    'def_rush_att',
+    'def_rush_td',
+    'def_rush_yds_per_att',
     'def_score_pct',
-    'def_turnover_pct'
+    'def_turnover_pct',
+    'def_yds_per_play_offense'
 }
 
 
@@ -65,16 +66,20 @@ def strip_chars_from_stat(stat_to_alter):
 
 def populate_inputs(year_stats, off_inputs, def_inputs):
     num_games_played = float(year_stats['g'])
+    stats_used = []
     for (stat_name, stat_value) in year_stats.items():
         formatted_stat = strip_chars_from_stat(stat_value)
         if formatted_stat.isdigit():
             per_game_stat = float(stat_value)/num_games_played
             if stat_name in off_stat_names_to_use:
                 off_inputs.append(per_game_stat)
+                stats_used.append(stat_name)
             elif stat_name in def_stat_names_to_use:
                 def_inputs.append(per_game_stat)
+                stats_used.append(stat_name)
+    return stats_used
 
-
+stat_names_used = []
 for year in range(2009, 2020):
     local_off_url = file_dir + local_off_template.replace('yyyy', str(year))
     local_def_url = file_dir + local_def_template.replace('yyyy', str(year))
@@ -142,7 +147,7 @@ for year in range(2009, 2020):
 
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
-        populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
+        stat_names_used = (populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs))
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
@@ -166,6 +171,11 @@ for year in range(2009, 2020):
 
 x, y = np.array(x_input), np.array(y_input)
 model = LinearRegression().fit(x, y)
+
+#dataset = pd.read_csv('C:\\Users\\bobna\\OneDrive\\Documents') #missing a parser file?
+
+coeff_df = pd.DataFrame(model.coef_, stat_names_used, columns=['Coefficient'])
+print(coeff_df)
 
 r_sq = model.score(x, y)
 print('coefficient of determination:', r_sq)
