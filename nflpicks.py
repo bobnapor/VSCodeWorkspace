@@ -266,7 +266,7 @@ x_plot = []
 for outcome in range(0, len(x_input)):
     x_plot.append(x_input[outcome][0])
 
-plt.plot(x_plot, y_input)
+plt.scatter(x_plot, y_input)
 plt.show()
 
 print('Completed!')
