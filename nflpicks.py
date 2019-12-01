@@ -163,6 +163,52 @@ def get_model_inputs(full_games_soup, single_year_stats, stat_names_used):
     return inputs, outputs
 
 
+def predict_weekly_scores(linear_regression_model, week_num_target):
+    future_games_file = open(games_template.replace('yyyy', '2019'))
+    future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
+    games_table = future_games_soup.find_all('table', id='games')[0]
+    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
+
+        week_num = game_row.find_all('th')[0].text
+
+        if week_num != week_num_target:
+            continue
+        else:
+            team1_off_inputs = []
+            team1_def_inputs = []
+            team2_off_inputs = []
+            team2_def_inputs = []
+            game_to_predict = dict()
+
+            game_stat_columns = game_row.find_all('td')
+
+            if len(game_stat_columns) < 1:
+                continue
+
+            for game_stat_column in game_stat_columns:
+                game_column_name = game_stat_column['data-stat']
+                game_to_predict[game_column_name] = game_stat_column.text
+
+            team1 = game_to_predict['winner']
+            team2 = game_to_predict['loser']
+            team1_year_stats = year_stats[2019][team1]
+            team2_year_stats = year_stats[2019][team2]
+
+            populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
+            populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
+
+            team1_off_inputs.extend(team2_def_inputs)
+            team2_off_inputs.extend(team1_def_inputs)
+            team1_inputs = []
+            team2_inputs = []
+            team1_inputs.append(team1_off_inputs)
+            team2_inputs.append(team2_off_inputs)
+
+            team1_pred = linear_regression_model.predict(team1_inputs)
+            team2_pred = linear_regression_model.predict(team2_inputs)
+            print(team1, ':', str(team1_pred[0]), ';', team2, ':', str(team2_pred[0]))
+
+
 year_stats = dict()
 x_input = []
 y_input = []
@@ -213,54 +259,6 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-
-def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2019'))
-    future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
-    games_table = future_games_soup.find_all('table', id='games')[0]
-    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
-
-        week_num = game_row.find_all('th')[0].text
-
-        if week_num != week_num_target:
-            continue
-        else:
-            team1_off_inputs = []
-            team1_def_inputs = []
-            team2_off_inputs = []
-            team2_def_inputs = []
-            game_to_predict = dict()
-
-            game_stat_columns = game_row.find_all('td')
-
-            if len(game_stat_columns) < 1:
-                continue
-
-            for game_stat_column in game_stat_columns:
-                game_column_name = game_stat_column['data-stat']
-                game_to_predict[game_column_name] = game_stat_column.text
-
-            team1 = game_to_predict['winner']
-            team2 = game_to_predict['loser']
-            team1_year_stats = year_stats[2019][team1]
-            team2_year_stats = year_stats[2019][team2]
-
-            populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
-            populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
-
-            team1_off_inputs.extend(team2_def_inputs)
-            team2_off_inputs.extend(team1_def_inputs)
-            team1_inputs = []
-            team2_inputs = []
-            team1_inputs.append(team1_off_inputs)
-            team2_inputs.append(team2_off_inputs)
-
-            team1_pred = linear_regression_model.predict(team1_inputs)
-            team2_pred = linear_regression_model.predict(team2_inputs)
-            print(team1, ':', str(team1_pred[0]), ';', team2, ':', str(team2_pred[0]))
-
-
 predict_weekly_scores(model, '13')
-
 
 print('Completed!')
