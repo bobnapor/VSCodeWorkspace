@@ -20,14 +20,9 @@ url_template = 'https://www.pro-football-reference.com/years/yyyy/'
 #    print(year_soup.prettify())
 
 file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
-local_games_template = 'yyyy_weekly_schedule.html'
-local_def_template = 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
-local_off_template = 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
-
-year_stats = dict()
-
-x_input = []
-y_input = []
+games_template = file_dir + 'yyyy_weekly_schedule.html'
+def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
+off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
 off_stat_names_to_use = {
     'pass_net_yds_per_att',
@@ -79,51 +74,50 @@ def populate_inputs(year_stats, off_inputs, def_inputs):
                 stats_used.append(stat_name)
     return stats_used
 
-stat_names_used = []
-for year in range(2009, 2020):
-    local_off_url = file_dir + local_off_template.replace('yyyy', str(year))
-    local_def_url = file_dir + local_def_template.replace('yyyy', str(year))
-    local_games_url = file_dir + local_games_template.replace('yyyy', str(year))
 
-    single_year_stats = dict()
-    local_off_file = open(local_off_url)
-    local_off_soup = BeautifulSoup(local_off_file.read(), 'html.parser')
-    for comment in local_off_soup.find_all(string=lambda text: isinstance(text, Comment)):
-        off_stats_soup = BeautifulSoup(comment.string, 'html.parser')
-        off_stats_tables = off_stats_soup.find_all('table', id='team_stats')
-        if len(off_stats_tables) < 1:
+def get_off_stats(full_offense_soup):
+    single_year_offense = dict()
+    for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
+        offense_soup = BeautifulSoup(comment.string, 'html.parser')
+        offense_tables = offense_soup.find_all('table', id='team_stats')
+        if len(offense_tables) < 1:
             continue
         else:
-            off_stats_table = off_stats_tables[0]
-            off_stats_rows = off_stats_table.find_all('tbody')[0].find_all('tr')
-            for off_stats_row in off_stats_rows:
-                single_team_stats = dict()
-                for off_stat_column in off_stats_row.find_all('td'):
-                    column_name = off_stat_column['data-stat']
-                    single_team_stats[column_name] = off_stat_column.text
-                team = single_team_stats['team']
-                single_year_stats[team] = single_team_stats
-                print('Extracted data for the ' + str(year) + ' ' + team)
+            offense_table = offense_tables[0]
+            offense_rows = offense_table.find_all('tbody')[0].find_all('tr')
+            for offense_row in offense_rows:
+                single_team_offense = dict()
+                for offense_column in offense_row.find_all('td'):
+                    column_name = offense_column['data-stat']
+                    single_team_offense[column_name] = offense_column.text
+                team = single_team_offense['team']
+                single_year_offense[team] = single_team_offense
+                print('Extracted offensive data for the ' + str(year) + ' ' + team)
+    return single_year_offense
 
-    local_def_file = open(local_def_url)
-    local_def_soup = BeautifulSoup(local_def_file.read(), 'html.parser')
-    def_stats_table = local_def_soup.find_all('table', id='team_stats')[0]
-    for def_stats_row in def_stats_table.find_all('tbody')[0].find_all('tr'):
-        single_team_stats_def = dict()
-        for def_stat_column in def_stats_row.find_all('td'):
-            column_name = 'def_' + def_stat_column['data-stat']
-            single_team_stats_def[column_name] = def_stat_column.text
-        team = single_team_stats_def['def_team']
-        for def_stat_key in single_team_stats_def:
-            single_year_stats[team][def_stat_key] = single_team_stats_def[def_stat_key]
 
-    local_games_file = open(local_games_url)
-    local_games_soup = BeautifulSoup(local_games_file.read(), 'html.parser')
-    games_table = local_games_soup.find_all('table', id='games')[0]
+def get_def_stats(full_defense_soup):
+    single_year_defense = dict()
+    defense_table = full_defense_soup.find_all('table', id='team_stats')[0]
+    for defense_row in defense_table.find_all('tbody')[0].find_all('tr'):
+        single_team_defense = dict()
+        for defense_column in defense_row.find_all('td'):
+            column_name = 'def_' + defense_column['data-stat']
+            single_team_defense[column_name] = defense_column.text
+        team = single_team_defense['def_team']
+        single_year_defense[team] = single_team_defense
+        print('Extracted defense data for the ' + str(year) + ' ' + team)
+    return single_year_defense
+
+
+def get_model_inputs(full_games_soup, single_year_stats, stat_names_used):
     game_counter = 0
+    games_table = full_games_soup.find_all('table', id='games')[0]
+    inputs = []
+    outputs = []
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
         if game_counter == 256:
-            continue
+            return inputs, outputs
 
         winner_off_inputs = []
         winner_def_inputs = []
@@ -143,11 +137,11 @@ for year in range(2009, 2020):
             single_game[game_column_name] = game_stat_column.text
 
         if single_game['boxscore_word'] == 'preview':
-            continue
+            return inputs, outputs
 
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
-        stat_names_used = (populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs))
+        stat_names_used.extend(populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs))
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
@@ -162,20 +156,57 @@ for year in range(2009, 2020):
 
         winner_score = int(single_game['pts_win'])
         loser_score = int(single_game['pts_lose'])
-        x_input.append(winner_inputs)
-        y_input.append(winner_score)
-        x_input.append(loser_inputs)
-        y_input.append(loser_score)
+        inputs.append(winner_inputs)
+        outputs.append(winner_score)
+        inputs.append(loser_inputs)
+        outputs.append(loser_score)
+    return inputs, outputs
+
+
+year_stats = dict()
+x_input = []
+y_input = []
+stat_names_used = []
+for year in range(2009, 2020):
+    single_year_stats = dict()
+
+    offense_file = open(off_template.replace('yyyy', str(year)))
+    offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
+    single_year_offense = get_off_stats(offense_soup)
+
+    defense_file = open(def_template.replace('yyyy', str(year)))
+    defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
+    single_year_defense = get_def_stats(defense_soup)
+
+    for team in single_year_offense:
+        single_team_stats = dict()
+        team_offense = single_year_offense[team]
+        team_defense = single_year_defense[team]
+        for stat_name in team_offense:
+            single_team_stats[stat_name] = team_offense[stat_name]
+        for stat_name in team_defense:
+            single_team_stats[stat_name] = team_defense[stat_name]
+        single_year_stats[team] = single_team_stats
 
     year_stats[year] = single_year_stats
+
+    games_file = open(games_template.replace('yyyy', str(year)))
+    games_soup = BeautifulSoup(games_file.read(), 'html.parser')
+    inputs, outputs = get_model_inputs(games_soup, single_year_stats, stat_names_used)
+
+    for input_stat in inputs:
+        x_input.append(input_stat)
+    for output_score in outputs:
+        y_input.append(output_score)
+
 
 x, y = np.array(x_input), np.array(y_input)
 model = LinearRegression().fit(x, y)
 
 #dataset = pd.read_csv('C:\\Users\\bobna\\OneDrive\\Documents') #missing a parser file?
 
-coeff_df = pd.DataFrame(model.coef_, stat_names_used, columns=['Coefficient'])
-print(coeff_df)
+#coeff_df = pd.DataFrame(model.coef_, stat_names_used, columns=['Coefficient'])
+#print(coeff_df)
 
 r_sq = model.score(x, y)
 print('coefficient of determination:', r_sq)
@@ -184,8 +215,7 @@ print('slope:', model.coef_)
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_url = file_dir + local_games_template.replace('yyyy', '2019')
-    future_games_file = open(future_games_url)
+    future_games_file = open(games_template.replace('yyyy', '2019'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
     games_table = future_games_soup.find_all('table', id='games')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
