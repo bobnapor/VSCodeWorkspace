@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from bs4 import Comment
 import pandas as pd
 from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
 
 
 url_template = 'https://www.pro-football-reference.com/years/yyyy/'
@@ -213,7 +214,7 @@ year_stats = dict()
 x_input = []
 y_input = []
 stat_names_used = []
-for year in range(2009, 2020):
+for year in range(2019, 2020):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
@@ -260,5 +261,12 @@ print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
 predict_weekly_scores(model, '13')
+
+x_plot = []
+for outcome in range(0, len(x_input)):
+    x_plot.append(x_input[outcome][0])
+
+plt.plot(x_plot, y_input)
+plt.show()
 
 print('Completed!')
