@@ -62,17 +62,20 @@ def strip_chars_from_stat(stat_to_alter):
 
 def populate_inputs(year_stats, off_inputs, def_inputs):
     num_games_played = float(year_stats['g'])
-    stats_used = []
+    stats_used = dict()
+    stat_num = 0
     for (stat_name, stat_value) in year_stats.items():
         formatted_stat = strip_chars_from_stat(stat_value)
         if formatted_stat.isdigit():
             per_game_stat = float(stat_value)/num_games_played
             if stat_name in off_stat_names_to_use:
                 off_inputs.append(per_game_stat)
-                stats_used.append(stat_name)
+                stats_used[stat_num] = stat_name
+                stat_num += 1
             elif stat_name in def_stat_names_to_use:
                 def_inputs.append(per_game_stat)
-                stats_used.append(stat_name)
+                stats_used[stat_num] = stat_name
+                stat_num += 1
     return stats_used
 
 
@@ -111,14 +114,15 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def get_model_inputs(full_games_soup, single_year_stats, stat_names_used):
+def get_model_inputs(full_games_soup, single_year_stats):
     game_counter = 0
     games_table = full_games_soup.find_all('table', id='games')[0]
     inputs = []
     outputs = []
+    stat_names_used = dict()
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
         if game_counter == 256:
-            return inputs, outputs
+            return inputs, outputs, stat_names_used
 
         winner_off_inputs = []
         winner_def_inputs = []
@@ -138,11 +142,13 @@ def get_model_inputs(full_games_soup, single_year_stats, stat_names_used):
             single_game[game_column_name] = game_stat_column.text
 
         if single_game['boxscore_word'] == 'preview':
-            return inputs, outputs
+            return inputs, outputs, stat_names_used
 
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
-        stat_names_used.extend(populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs))
+        stat_names_used_tmp = populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
+        if len(stat_names_used_tmp) == len(off_stat_names_to_use) + len(def_stat_names_to_use):
+            stat_names_used = stat_names_used_tmp
 
         loser = single_game['loser']
         loser_stats = single_year_stats[loser]
@@ -161,7 +167,7 @@ def get_model_inputs(full_games_soup, single_year_stats, stat_names_used):
         outputs.append(winner_score)
         inputs.append(loser_inputs)
         outputs.append(loser_score)
-    return inputs, outputs
+    return inputs, outputs, stat_names_used
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
@@ -213,7 +219,7 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 year_stats = dict()
 x_input = []
 y_input = []
-stat_names_used = []
+stat_names_used = dict()
 for year in range(2009, 2020):
     single_year_stats = dict()
 
@@ -239,7 +245,7 @@ for year in range(2009, 2020):
 
     games_file = open(games_template.replace('yyyy', str(year)))
     games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-    inputs, outputs = get_model_inputs(games_soup, single_year_stats, stat_names_used)
+    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats)
 
     for input_stat in inputs:
         x_input.append(input_stat)
@@ -262,11 +268,15 @@ print('slope:', model.coef_)
 
 predict_weekly_scores(model, '13')
 
-x_plot = []
-for outcome in range(0, len(x_input)):
-    x_plot.append(x_input[outcome][0])
+for num_stat in range(0, len(x_input[0])):
+    x_plot = []
+    x_label = stat_names_used[num_stat]
+    for outcome in range(0, len(x_input)):
+        x_plot.append(x_input[outcome][num_stat])
 
-plt.scatter(x_plot, y_input)
-plt.show()
+    plt.scatter(x_plot, y_input)
+    plt.xlabel(x_label)
+    plt.ylabel('single game points')
+    plt.show()
 
 print('Completed!')
