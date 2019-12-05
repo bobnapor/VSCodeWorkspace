@@ -26,53 +26,30 @@ def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Foot
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
 off_stat_names_to_use = {
-    'exp_pts_tot',
-    'fumbles_lost',
-    'pass_att',
-    'pass_cmp',
-    'pass_fd',
-    'pass_int',
-    'pass_net_yds_per_att',
-    'pass_td',
-    'pass_yds',
-    'pen_fd',
-    'penalties',
-    'penalties_yds',
-    'plays_offense',
     'points',
-    'rush_att',
+    'plays_offense',
+    'pass_yds',
+    'pass_td',
+    'pass_int',
+    'pass_fd',
     'rush_fd',
-    'rush_td',
-    'rush_yds',
-    'rush_yds_per_att',
     'score_pct',
     'turnover_pct',
-    'yds_per_play_offense'
+    'exp_pts_tot'
 }
 
 def_stat_names_to_use = {
-    'def_exp_pts_def_tot',
-    'def_fumbles_lost',
-    'def_pass_att',
-    'def_pass_cmp',
-    'def_pass_fd',
-    'def_pass_int',
-    'def_pass_net_yds_per_att',
-    'def_pass_td',
-    'def_pass_yds',
-    'def_pen_fd',
-    'def_penalties',
-    'def_penalties_yds',
-    'def_plays_offense',
     'def_points',
-    'def_rush_att',
-    'def_rush_fd',
+    'def_fumbles_lost',
+    'def_pass_yds',
+    'def_pass_td',
+    'def_pass_int',
+    'def_pass_fd',
     'def_rush_td',
-    'def_rush_yds',
     'def_rush_yds_per_att',
-    'def_score_pct',
+    'def_rush_fd',
     'def_turnover_pct',
-    'def_yds_per_play_offense'
+    'def_exp_pts_def_tot'
 }
 
 
@@ -297,6 +274,6 @@ for num_stat in range(0, len(x_input[0])):
     plt.scatter(x_plot, y_input)
     plt.xlabel(x_label)
     plt.ylabel('single game points')
-    plt.show()
+    #plt.show()
 
 print('Completed!')
