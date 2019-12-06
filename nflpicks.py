@@ -5,6 +5,7 @@ from bs4 import Comment
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 
 url_template = 'https://www.pro-football-reference.com/years/yyyy/'
@@ -24,6 +25,10 @@ file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
 games_template = file_dir + 'yyyy_weekly_schedule.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
+
+months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'July':7, 'August':8, 'September':9, 'October':10, 'November':11, 'December':12}
+
+start_time = datetime.now()
 
 off_stat_names_to_use = {
     'points',
@@ -111,7 +116,25 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def get_model_inputs(full_games_soup, single_year_stats):
+def is_game_in_past(program_start_time, game_year, game_date, game_time):
+    game_hours = game_time[:1]
+    game_minutes = game_time[2:4]
+    game_am_pm = game_time[4:]
+
+    if game_am_pm == 'PM':
+        game_hours += 12
+
+    game_date_split = game_date.split()
+    game_month = game_date_split[0]
+    game_month_number = months[game_month]
+    game_day_number = game_date_split[1]
+
+    game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
+
+    return program_start_time > game_datetime
+
+
+def get_model_inputs(full_games_soup, single_year_stats, year):
     game_counter = 0
     games_table = full_games_soup.find_all('table', id='games')[0]
     inputs = []
@@ -138,7 +161,7 @@ def get_model_inputs(full_games_soup, single_year_stats):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if single_game['boxscore_word'] == 'preview':
+        if is_game_in_past(start_time, year, single_game['game_date'], single_game['gametime']):
             return inputs, outputs, stat_names_used
 
         winner = single_game['winner']
@@ -158,6 +181,7 @@ def get_model_inputs(full_games_soup, single_year_stats):
         loser_inputs.extend(loser_off_inputs)
         loser_inputs.extend(winner_def_inputs)
 
+        #print(single_game)
         winner_score = int(single_game['pts_win'])
         loser_score = int(single_game['pts_lose'])
         inputs.append(winner_inputs)
@@ -217,6 +241,7 @@ year_stats = dict()
 x_input = []
 y_input = []
 stat_names_used = dict()
+
 for year in range(2009, 2020):
     single_year_stats = dict()
 
@@ -263,7 +288,7 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '13')
+predict_weekly_scores(model, '14')
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
