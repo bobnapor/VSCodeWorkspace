@@ -116,22 +116,25 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_past(program_start_time, game_year, game_date, game_time):
-    game_hours = game_time[:1]
-    game_minutes = game_time[2:4]
-    game_am_pm = game_time[4:]
+def is_game_in_future(program_start_time, game_year, game_date, game_time):
+    game_time_split = game_time.split(':')
+    game_hours = int(game_time_split[0])
+    game_minutes = int(game_time_split[1][:2])
+    game_am_pm = game_time_split[1][2:]
 
-    if game_am_pm == 'PM':
+    if game_am_pm == 'PM' and game_hours != 12:
         game_hours += 12
+    elif game_am_pm == 'AM' and game_hours == 12:
+        game_hours = 0
 
     game_date_split = game_date.split()
     game_month = game_date_split[0]
     game_month_number = months[game_month]
-    game_day_number = game_date_split[1]
+    game_day_number = int(game_date_split[1])
 
     game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
 
-    return program_start_time > game_datetime
+    return game_datetime > program_start_time
 
 
 def get_model_inputs(full_games_soup, single_year_stats, year):
@@ -161,7 +164,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_past(start_time, year, single_game['game_date'], single_game['gametime']):
+        if is_game_in_future(start_time, year, single_game['game_date'], single_game['gametime']):
             return inputs, outputs, stat_names_used
 
         winner = single_game['winner']
@@ -267,7 +270,7 @@ for year in range(2009, 2020):
 
     games_file = open(games_template.replace('yyyy', str(year)))
     games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats)
+    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
 
     for input_stat in inputs:
         x_input.append(input_stat)
