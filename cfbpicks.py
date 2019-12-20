@@ -274,7 +274,7 @@ x_input = []
 y_input = []
 stat_names_used = dict()
 
-for year in range(2019, 2020):
+for year in range(2015, 2020):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
