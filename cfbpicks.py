@@ -8,53 +8,63 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 
-url_template = 'https://www.pro-football-reference.com/years/yyyy/'
-#def_url = 'https://www.pro-football-reference.com/years/2009/opp.htm'
-#games_url = 'https://www.pro-football-reference.com/years/2019/games.htm'
+file_dir = 'C:/Users/bobna/Downloads/CFB_Stats/'
+games_template = file_dir + 'yyyy Schedule and Results _ College Football at Sports-Reference.com.html'
+def_template = file_dir + 'yyyy Team Defense _ College Football at Sports-Reference.com.html'
+off_template = file_dir + 'yyyy Team Offense _ College Football at Sports-Reference.com.html'
 
-
-#TODO: for use when online - need to expand on this for the other pages
-#for year in range(2009,2020):
-#    year_url = url_template.replace('yyyy', str(year))
-#    year_req = requests.get(year_url)
-#    print(year_req.status_code)
-#    year_soup = BeautifulSoup(year_req.content, 'html.parser')
-#    print(year_soup.prettify())
-
-file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
-games_template = file_dir + 'yyyy_weekly_schedule.html'
-def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
-off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
-
-months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'July':7, 'August':8, 'September':9, 'October':10, 'November':11, 'December':12}
+months = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
 
 start_time = datetime.now()
 
 off_stat_names_to_use = {
     'points',
-    'plays_offense',
+    'pass_cmp',
+    'pass_att',
+    'pass_cmp_pct',
     'pass_yds',
     'pass_td',
+    'rush_att',
+    'rush_yds',
+    'rush_yds_per_att',
+    'rush_td',
+    'tot_plays',
+    'tot_yds',
+    'tot_yds_per_play',
+    'first_down_pass',
+    'first_down_rush',
+    'first_down_penalty',
+    'first_down',
+    'penalty',
+    'penalty_yds',
+    'fumbles_lost',
     'pass_int',
-    'pass_fd',
-    'rush_fd',
-    'score_pct',
-    'turnover_pct',
-    'exp_pts_tot'
+    'turnovers'
 }
 
 def_stat_names_to_use = {
-    'def_points',
-    'def_fumbles_lost',
-    'def_pass_yds',
-    'def_pass_td',
-    'def_pass_int',
-    'def_pass_fd',
-    'def_rush_td',
-    'def_rush_yds_per_att',
-    'def_rush_fd',
-    'def_turnover_pct',
-    'def_exp_pts_def_tot'
+    'def_opp_points',
+    'def_opp_pass_cmp',
+    'def_opp_pass_att',
+    'def_opp_pass_cmp_pct',
+    'def_opp_pass_yds',
+    'def_opp_pass_td',
+    'def_opp_rush_att',
+    'def_opp_rush_yds',
+    'def_opp_rush_yds_per_att',
+    'def_opp_rush_td',
+    'def_opp_tot_plays',
+    'def_opp_tot_yds',
+    'def_opp_tot_yds_per_play',
+    'def_opp_first_down_pass',
+    'def_opp_first_down_rush',
+    'def_opp_first_down_penalty',
+    'def_opp_first_down',
+    'def_opp_penalty',
+    'def_opp_penalty_yds',
+    'def_opp_fumbles_lost',
+    'def_opp_pass_int',
+    'def_opp_turnovers'
 }
 
 
@@ -63,13 +73,13 @@ def strip_chars_from_stat(stat_to_alter):
 
 
 def populate_inputs(year_stats, off_inputs, def_inputs):
-    num_games_played = float(year_stats['g'])
     stats_used = dict()
     stat_num = 0
+
     for (stat_name, stat_value) in year_stats.items():
         formatted_stat = strip_chars_from_stat(stat_value)
         if formatted_stat.isdigit():
-            per_game_stat = float(stat_value)/num_games_played
+            per_game_stat = float(stat_value)
             if stat_name in off_stat_names_to_use:
                 off_inputs.append(per_game_stat)
                 stats_used[stat_num] = stat_name
@@ -83,34 +93,31 @@ def populate_inputs(year_stats, off_inputs, def_inputs):
 
 def get_off_stats(full_offense_soup):
     single_year_offense = dict()
-    for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
-        offense_soup = BeautifulSoup(comment.string, 'html.parser')
-        offense_tables = offense_soup.find_all('table', id='team_stats')
-        if len(offense_tables) < 1:
+    offense_table = offense_soup.find_all('table', id='offense')[0]
+    for offense_row in offense_table.find_all('tbody')[0].find_all('tr'):
+        if len(offense_row.find_all('td')) < 1:
             continue
-        else:
-            offense_table = offense_tables[0]
-            offense_rows = offense_table.find_all('tbody')[0].find_all('tr')
-            for offense_row in offense_rows:
-                single_team_offense = dict()
-                for offense_column in offense_row.find_all('td'):
-                    column_name = offense_column['data-stat']
-                    single_team_offense[column_name] = offense_column.text
-                team = single_team_offense['team']
-                single_year_offense[team] = single_team_offense
-                print('Extracted offensive data for the ' + str(year) + ' ' + team)
+        single_team_offense = dict()
+        for offense_column in offense_row.find_all('td'):
+            column_name = offense_column['data-stat']
+            single_team_offense[column_name] = offense_column.text
+        team = single_team_offense['school_name']
+        single_year_offense[team] = single_team_offense
+        print('Extracted offensive data for the ' + str(year) + ' ' + team)
     return single_year_offense
 
 
-def get_def_stats(full_defense_soup):
+def get_def_stats(full_defense_soup):   #combine with above - parameterize offense vs defense specifics
     single_year_defense = dict()
-    defense_table = full_defense_soup.find_all('table', id='team_stats')[0]
+    defense_table = full_defense_soup.find_all('table', id='defense')[0]
     for defense_row in defense_table.find_all('tbody')[0].find_all('tr'):
+        if len(defense_row.find_all('td')) < 1:
+            continue
         single_team_defense = dict()
         for defense_column in defense_row.find_all('td'):
             column_name = 'def_' + defense_column['data-stat']
             single_team_defense[column_name] = defense_column.text
-        team = single_team_defense['def_team']
+        team = single_team_defense['def_school_name']
         single_year_defense[team] = single_team_defense
         print('Extracted defense data for the ' + str(year) + ' ' + team)
     return single_year_defense
@@ -120,7 +127,7 @@ def is_game_in_future(program_start_time, game_year, game_date, game_time):
     game_time_split = game_time.split(':')
     game_hours = int(game_time_split[0])
     game_minutes = int(game_time_split[1][:2])
-    game_am_pm = game_time_split[1][2:]
+    game_am_pm = str.strip(game_time_split[1][2:])
 
     if game_am_pm == 'PM' and game_hours != 12:
         game_hours += 12
@@ -130,7 +137,7 @@ def is_game_in_future(program_start_time, game_year, game_date, game_time):
     game_date_split = game_date.split()
     game_month = game_date_split[0]
     game_month_number = months[game_month]
-    game_day_number = int(game_date_split[1])
+    game_day_number = int(game_date_split[1].replace(',', '')) #strip comma
 
     game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
 
@@ -138,15 +145,12 @@ def is_game_in_future(program_start_time, game_year, game_date, game_time):
 
 
 def get_model_inputs(full_games_soup, single_year_stats, year):
-    game_counter = 0
-    games_table = full_games_soup.find_all('table', id='games')[0]
     inputs = []
     outputs = []
     stat_names_used = dict()
-    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
-        if game_counter == 256:
-            return inputs, outputs, stat_names_used
 
+    games_table = full_games_soup.find_all('table', id='schedule')[0]
+    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
         winner_off_inputs = []
         winner_def_inputs = []
         loser_off_inputs = []
@@ -158,22 +162,27 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         if len(game_stat_columns) < 1:
             continue
 
-        game_counter += 1
-
         for game_stat_column in game_stat_columns:
             game_column_name = game_stat_column['data-stat']
-            single_game[game_column_name] = game_stat_column.text
+            if game_stat_column.a is not None and (game_column_name == 'winner_school_name' or game_column_name == 'loser_school_name'):
+                single_game[game_column_name] = game_stat_column.a.text
+            else:
+                single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, year, single_game['game_date'], single_game['gametime']):
+        if is_game_in_future(start_time, year, single_game['date_game'], single_game['time_game']):
             return inputs, outputs, stat_names_used
 
-        winner = single_game['winner']
+        winner = single_game['winner_school_name']
+        loser = single_game['loser_school_name']
+
+        if winner not in single_year_stats or loser not in single_year_stats:
+            continue
+
         winner_stats = single_year_stats[winner]
         stat_names_used_tmp = populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
         if len(stat_names_used_tmp) == len(off_stat_names_to_use) + len(def_stat_names_to_use):
             stat_names_used = stat_names_used_tmp
 
-        loser = single_game['loser']
         loser_stats = single_year_stats[loser]
         populate_inputs(loser_stats, loser_off_inputs, loser_def_inputs)
 
@@ -185,8 +194,8 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         loser_inputs.extend(winner_def_inputs)
 
         #print(single_game)
-        winner_score = int(single_game['pts_win'])
-        loser_score = int(single_game['pts_lose'])
+        winner_score = int(single_game['winner_points'])
+        loser_score = int(single_game['loser_points'])
         inputs.append(winner_inputs)
         outputs.append(winner_score)
         inputs.append(loser_inputs)
@@ -245,7 +254,7 @@ x_input = []
 y_input = []
 stat_names_used = dict()
 
-for year in range(2009, 2020):
+for year in range(2019, 2020):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
