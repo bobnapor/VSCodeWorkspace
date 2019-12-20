@@ -15,6 +15,15 @@ off_template = file_dir + 'yyyy Team Offense _ College Football at Sports-Refere
 
 months = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
 
+variable_school_names = {
+    'Alabama-Birmingham':'UAB',
+    'Southern Methodist':'SMU',
+    'Central Florida':'UCF',
+    'Southern California':'USC',
+    'Louisiana State':'LSU',
+    'Pittsburgh':'Pitt'
+}
+
 start_time = datetime.now()
 
 off_stat_names_to_use = {
@@ -175,6 +184,11 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         winner = single_game['winner_school_name']
         loser = single_game['loser_school_name']
 
+        if winner in variable_school_names:
+            winner = variable_school_names[winner]
+        if loser in variable_school_names:
+            loser = variable_school_names[loser]
+
         if winner not in single_year_stats or loser not in single_year_stats:
             continue
 
@@ -206,31 +220,37 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
 def predict_weekly_scores(linear_regression_model, week_num_target):
     future_games_file = open(games_template.replace('yyyy', '2019'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
-    games_table = future_games_soup.find_all('table', id='games')[0]
+
+    games_table = future_games_soup.find_all('table', id='schedule')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
 
-        week_num = game_row.find_all('th')[0].text
+        game_stat_columns = game_row.find_all('td')
 
-        if week_num != week_num_target:
+        if len(game_stat_columns) < 1:
+            continue
+
+        game_to_predict = dict()
+        for game_stat_column in game_stat_columns:
+            game_column_name = game_stat_column['data-stat']
+            if game_stat_column.a is not None and (game_column_name == 'winner_school_name' or game_column_name == 'loser_school_name'):
+                game_to_predict[game_column_name] = game_stat_column.a.text
+            else:
+                game_to_predict[game_column_name] = game_stat_column.text
+
+        if game_to_predict['week_number'] != week_num_target:
             continue
         else:
             team1_off_inputs = []
             team1_def_inputs = []
             team2_off_inputs = []
             team2_def_inputs = []
-            game_to_predict = dict()
 
-            game_stat_columns = game_row.find_all('td')
-
-            if len(game_stat_columns) < 1:
-                continue
-
-            for game_stat_column in game_stat_columns:
-                game_column_name = game_stat_column['data-stat']
-                game_to_predict[game_column_name] = game_stat_column.text
-
-            team1 = game_to_predict['winner']
-            team2 = game_to_predict['loser']
+            team1 = game_to_predict['winner_school_name']
+            team2 = game_to_predict['loser_school_name']
+            if team1 in variable_school_names:
+                team1 = variable_school_names[team1]
+            if team2 in variable_school_names:
+                team2 = variable_school_names[team2]
             team1_year_stats = year_stats[2019][team1]
             team2_year_stats = year_stats[2019][team2]
 
@@ -300,7 +320,9 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '15')
+weeks_to_predict = ('18', '19', '20', '21') #bowls are 18, 19, 20, 21
+for week_number in weeks_to_predict:
+    predict_weekly_scores(model, week_number)
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
