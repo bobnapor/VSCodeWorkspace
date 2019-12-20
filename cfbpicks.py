@@ -28,12 +28,9 @@ start_time = datetime.now()
 
 off_stat_names_to_use = {
     'points',
-    'pass_cmp',
-    'pass_att',
     'pass_cmp_pct',
     'pass_yds',
     'pass_td',
-    'rush_att',
     'rush_yds',
     'rush_yds_per_att',
     'rush_td',
@@ -42,19 +39,15 @@ off_stat_names_to_use = {
     'tot_yds_per_play',
     'first_down_pass',
     'first_down_rush',
-    'first_down_penalty',
     'first_down',
-    'penalty',
-    'penalty_yds',
     'fumbles_lost',
     'pass_int',
-    'turnovers'
 }
+
 
 def_stat_names_to_use = {
     'def_opp_points',
     'def_opp_pass_cmp',
-    'def_opp_pass_att',
     'def_opp_pass_cmp_pct',
     'def_opp_pass_yds',
     'def_opp_pass_td',
@@ -69,11 +62,9 @@ def_stat_names_to_use = {
     'def_opp_first_down_rush',
     'def_opp_first_down_penalty',
     'def_opp_first_down',
-    'def_opp_penalty',
     'def_opp_penalty_yds',
     'def_opp_fumbles_lost',
     'def_opp_pass_int',
-    'def_opp_turnovers'
 }
 
 
