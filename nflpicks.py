@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 from datetime import datetime
+#import nfl_ats_utils as nfl_utils --- get all functions in this file
 
 
 url_template = 'https://www.pro-football-reference.com/years/yyyy/'
@@ -237,7 +238,7 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print(team1, ':', str(team1_pred[0]), ';', team2, ':', str(team2_pred[0]))
+            print(team1 + ':' + str(team1_pred[0]) + ':' + team2 + ':' + str(team2_pred[0]))
 
 
 year_stats = dict()
@@ -291,7 +292,7 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '14')
+predict_weekly_scores(model, '16')
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
