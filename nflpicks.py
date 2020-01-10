@@ -40,10 +40,10 @@ off_stat_names_to_use = {
     'pass_fd',
     'rush_fd',
     'score_pct',
-    'turnover_pct',
-    'exp_pts_tot'
+    'turnover_pct'
 }
 
+#figure out way to also only use stats common across all years (def_exp_pts_def_tot and exp_pts_tot for example blank in 2019)
 def_stat_names_to_use = {
     'def_points',
     'def_fumbles_lost',
@@ -54,8 +54,7 @@ def_stat_names_to_use = {
     'def_rush_td',
     'def_rush_yds_per_att',
     'def_rush_fd',
-    'def_turnover_pct',
-    'def_exp_pts_def_tot'
+    'def_turnover_pct'
 }
 
 
@@ -292,7 +291,7 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '16')
+predict_weekly_scores(model, 'WildCard')
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
