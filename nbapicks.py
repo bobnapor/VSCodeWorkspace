@@ -224,10 +224,10 @@ stat_names_used = dict()
 for year in range(2019, 2020):
     single_year_stats = dict()
 
-    next_year = str(year + 1)[2:]  #here
+    next_year = str(year + 1)[2:]
 
     stats_file = open(stats_template.replace('yyyy', str(year)).replace('yy', next_year), 'rb')
-    stats_soup = BeautifulSoup(stats_file.read(), 'html.parser') #UnicodeDecodeError: 'charmap' codec can't decode byte 0x8d in position 502560: character maps to <undefined>
+    stats_soup = BeautifulSoup(stats_file.read(), 'html.parser')
     single_year_offense = get_off_stats(stats_soup)
 
     single_year_defense = get_def_stats(stats_soup)
@@ -244,7 +244,7 @@ for year in range(2019, 2020):
 
     year_stats[year] = single_year_stats
 
-    for month in months:
+    for month in months:    #here
         games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year))
         games_soup = BeautifulSoup(games_file.read(), 'html.parser')
         inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
