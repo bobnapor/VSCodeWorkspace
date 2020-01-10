@@ -115,7 +115,7 @@ def is_game_in_future(program_start_time, game_year, game_date, game_time):
 
 def get_model_inputs(full_games_soup, single_year_stats, year):
     game_counter = 0
-    games_table = full_games_soup.find_all('table', id='games')[0]
+    games_table = full_games_soup.find_all('table', id='schedule')[0]
     inputs = []
     outputs = []
     stat_names_used = dict()
@@ -140,16 +140,17 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, year, single_game['game_date'], single_game['gametime']):
+        if is_game_in_future(start_time, year, single_game['date_game'], single_game['game_start_time']):   #left off here, hits error
             return inputs, outputs, stat_names_used
 
-        winner = single_game['winner']
+        #not done by winner and loser, honestly dont think i care -> just predicting team1 score vs team2 score
+        winner = single_game['visitor_team_name']
         winner_stats = single_year_stats[winner]
         stat_names_used_tmp = populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
         if len(stat_names_used_tmp) == len(off_stat_names_to_use) + len(def_stat_names_to_use):
             stat_names_used = stat_names_used_tmp
 
-        loser = single_game['loser']
+        loser = single_game['home_team_name']
         loser_stats = single_year_stats[loser]
         populate_inputs(loser_stats, loser_off_inputs, loser_def_inputs)
 
@@ -160,9 +161,8 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         loser_inputs.extend(loser_off_inputs)
         loser_inputs.extend(winner_def_inputs)
 
-        #print(single_game)
-        winner_score = int(single_game['pts_win'])
-        loser_score = int(single_game['pts_lose'])
+        winner_score = int(single_game['visitor_pts'])  #should rename all these vars as im not doing winner and loser
+        loser_score = int(single_game['home_pts'])
         inputs.append(winner_inputs)
         outputs.append(winner_score)
         inputs.append(loser_inputs)
@@ -245,7 +245,7 @@ for year in range(2019, 2020):
     year_stats[year] = single_year_stats
 
     for month in months:    #here
-        games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year))
+        games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', month), 'rb')
         games_soup = BeautifulSoup(games_file.read(), 'html.parser')
         inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
 
