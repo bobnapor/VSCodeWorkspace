@@ -92,21 +92,22 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_future(program_start_time, game_year, game_date, game_time):
+def is_game_in_future(program_start_time, game_date, game_time):
     game_time_split = game_time.split(':')
     game_hours = int(game_time_split[0])
     game_minutes = int(game_time_split[1][:2])
     game_am_pm = game_time_split[1][2:]
 
-    if game_am_pm == 'PM' and game_hours != 12:
+    if game_am_pm == 'p' and game_hours != 12:
         game_hours += 12
-    elif game_am_pm == 'AM' and game_hours == 12:
+    elif game_am_pm == 'a' and game_hours == 12:
         game_hours = 0
 
-    game_date_split = game_date.split()
-    game_month = game_date_split[0]
-    game_month_number = months[game_month]
-    game_day_number = int(game_date_split[1])
+    game_date_split = game_date.replace(',', '').split()
+    game_year = int(game_date_split[3])
+    game_month = game_date_split[1]
+    game_month_number = months_abbr[game_month]
+    game_day_number = int(game_date_split[2])
 
     game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
 
@@ -129,6 +130,8 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         loser_def_inputs = []
         single_game = dict()
 
+        game_date = game_row.find('th').a.text
+        single_game['game_date'] = game_date
         game_stat_columns = game_row.find_all('td')
 
         if len(game_stat_columns) < 1:
@@ -140,7 +143,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, year, single_game['date_game'], single_game['game_start_time']):   #left off here, hits error
+        if is_game_in_future(start_time, game_date, single_game['game_start_time']):   #left off here, hits error
             return inputs, outputs, stat_names_used
 
         #not done by winner and loser, honestly dont think i care -> just predicting team1 score vs team2 score
