@@ -17,6 +17,7 @@ stats_template = file_dir + 'yyyy-yy NBA Season Summary _ Basketball-Reference.c
 
 months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'July':7, 'August':8, 'September':9, 'October':10, 'November':11, 'December':12}
 months_abbr = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
+season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'April':4}
 
 start_time = datetime.now()
 
@@ -143,7 +144,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, game_date, single_game['game_start_time']):   #left off here, hits error
+        if is_game_in_future(start_time, game_date, single_game['game_start_time']):
             return inputs, outputs, stat_names_used
 
         #not done by winner and loser, honestly dont think i care -> just predicting team1 score vs team2 score
@@ -247,7 +248,7 @@ for year in range(2019, 2020):
 
     year_stats[year] = single_year_stats
 
-    for month in months:    #here
+    for month in season_months:
         games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', month), 'rb')
         games_soup = BeautifulSoup(games_file.read(), 'html.parser')
         inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
