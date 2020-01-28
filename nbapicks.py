@@ -29,25 +29,27 @@ def_stat_names_to_use = {
 
 
 def strip_chars_from_stat(stat_to_alter):
-    return stat_to_alter.replace('-','').replace(' ', '').replace(',','').replace('.','')
+    return stat_to_alter.replace('-','').replace(' ', '').replace(',','')
 
 
 def populate_inputs(year_stats, off_inputs, def_inputs):
-    num_games_played = float(year_stats['g'])
     stats_used = dict()
     stat_num = 0
+
     for (stat_name, stat_value) in year_stats.items():
-        formatted_stat = strip_chars_from_stat(stat_value)
-        if formatted_stat.isdigit():
-            per_game_stat = float(stat_value)/num_games_played
-            if stat_name in off_stat_names_to_use:
+        try:
+            per_game_stat = float(stat_value)
+            if stat_name in off_stat_names_to_use or (len(off_stat_names_to_use) == 0 and stat_name[:4] != 'opp_'):
                 off_inputs.append(per_game_stat)
                 stats_used[stat_num] = stat_name
                 stat_num += 1
-            elif stat_name in def_stat_names_to_use:
+            elif stat_name in def_stat_names_to_use or (len(def_stat_names_to_use) == 0 and stat_name[:4] == 'opp_'):
                 def_inputs.append(per_game_stat)
                 stats_used[stat_num] = stat_name
                 stat_num += 1
+        except ValueError:
+            print(stat_name + '=' + stat_value + ': Not a float')
+
     return stats_used
 
 
@@ -112,19 +114,17 @@ def is_game_in_future(program_start_time, game_date, game_time):
 
     game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
 
+    program_start_time = datetime(year=2020, month=1, day=24, hour=6, minute=20)    #remove this, just for testing
     return game_datetime > program_start_time
 
 
 def get_model_inputs(full_games_soup, single_year_stats, year):
-    game_counter = 0
-    games_table = full_games_soup.find_all('table', id='schedule')[0]
     inputs = []
     outputs = []
     stat_names_used = dict()
-    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
-        if game_counter == 256:
-            return inputs, outputs, stat_names_used
 
+    games_table = full_games_soup.find_all('table', id='schedule')[0]
+    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
         winner_off_inputs = []
         winner_def_inputs = []
         loser_off_inputs = []
@@ -138,8 +138,6 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         if len(game_stat_columns) < 1:
             continue
 
-        game_counter += 1
-
         for game_stat_column in game_stat_columns:
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
@@ -152,6 +150,8 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         winner_stats = single_year_stats[winner]
         stat_names_used_tmp = populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
         if len(stat_names_used_tmp) == len(off_stat_names_to_use) + len(def_stat_names_to_use):
+            stat_names_used = stat_names_used_tmp
+        elif len(off_stat_names_to_use) + len(def_stat_names_to_use) == 0:
             stat_names_used = stat_names_used_tmp
 
         loser = single_game['home_team_name']
@@ -253,10 +253,10 @@ for year in range(2019, 2020):
         games_soup = BeautifulSoup(games_file.read(), 'html.parser')
         inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
 
-    for input_stat in inputs:
-        x_input.append(input_stat)
-    for output_score in outputs:
-        y_input.append(output_score)
+        for input_stat in inputs:
+            x_input.append(input_stat)
+        for output_score in outputs:
+            y_input.append(output_score)
 
 
 x, y = np.array(x_input), np.array(y_input)
@@ -272,7 +272,7 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '16')
+predict_weekly_scores(model, '16') #left off here
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
