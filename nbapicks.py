@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 from datetime import datetime
+from datetime import timedelta
 #import nfl_ats_utils as nfl_utils --- get all functions in this file
 
 #2019-20 NBA Season Summary _ Basketball-Reference.com
@@ -48,7 +49,8 @@ def populate_inputs(year_stats, off_inputs, def_inputs):
                 stats_used[stat_num] = stat_name
                 stat_num += 1
         except ValueError:
-            print(stat_name + '=' + stat_value + ': Not a float')
+            #print(stat_name + '=' + stat_value + ': Not a float')
+            continue
 
     return stats_used
 
@@ -174,16 +176,23 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
     return inputs, outputs, stat_names_used
 
 
-def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2019'))
+def predict_weekly_scores(linear_regression_model, predict_end_date): #use today's date to get month of game
+    future_games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', 'January'), 'rb')
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
-    games_table = future_games_soup.find_all('table', id='games')[0]
+
+    games_table = future_games_soup.find_all('table', id='schedule')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
+        game_date = game_row.find('th').a.text
+        game_date_split = game_date.replace(',', '').split()
+        game_year = int(game_date_split[3])
+        game_month = game_date_split[1]
+        game_month_number = months_abbr[game_month]
+        game_day_number = int(game_date_split[2])
 
-        week_num = game_row.find_all('th')[0].text
+        game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number)
 
-        if week_num != week_num_target:
-            continue
+        if game_datetime > predict_end_date:
+            return
         else:
             team1_off_inputs = []
             team1_def_inputs = []
@@ -200,8 +209,8 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
                 game_column_name = game_stat_column['data-stat']
                 game_to_predict[game_column_name] = game_stat_column.text
 
-            team1 = game_to_predict['winner']
-            team2 = game_to_predict['loser']
+            team1 = game_to_predict['visitor_team_name']
+            team2 = game_to_predict['home_team_name']
             team1_year_stats = year_stats[2019][team1]
             team2_year_stats = year_stats[2019][team2]
 
@@ -217,7 +226,7 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print(team1 + ':' + str(team1_pred[0]) + ':' + team2 + ':' + str(team2_pred[0]))
+            print('Date:' + str(game_datetime) + ':' + team1 + ':' + str(team1_pred[0]) + ':' + team2 + ':' + str(team2_pred[0]))
 
 
 year_stats = dict()
@@ -251,7 +260,10 @@ for year in range(2019, 2020):
     for month in season_months:
         games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', month), 'rb')
         games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-        inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
+        inputs, outputs, stat_names_used_tmp2 = get_model_inputs(games_soup, single_year_stats, year)
+
+        for (stat_num, stat_name) in stat_names_used_tmp2.items():
+            stat_names_used[stat_num] = stat_name
 
         for input_stat in inputs:
             x_input.append(input_stat)
@@ -272,17 +284,20 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '16') #left off here
+tomorrow = start_time + timedelta(days=1)
+
+predict_weekly_scores(model, tomorrow) #left off here, want to predict everything on the days prior to 'two_days'
+#need to pass in midnight on the date above
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
-    x_label = stat_names_used[num_stat]
+    x_label = stat_names_used[num_stat] #empty when it gets here
     for outcome in range(0, len(x_input)):
         x_plot.append(x_input[outcome][num_stat])
 
     plt.scatter(x_plot, y_input)
     plt.xlabel(x_label)
     plt.ylabel('single game points')
-    #plt.show()
+    plt.show()
 
 print('Completed!')
