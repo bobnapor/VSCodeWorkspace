@@ -97,7 +97,7 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_future(program_start_time, game_date, game_time):
+def is_game_in_past(program_start_time, game_date, game_time):
     game_time_split = game_time.split(':')
     game_hours = int(game_time_split[0])
     game_minutes = int(game_time_split[1][:2])
@@ -114,10 +114,12 @@ def is_game_in_future(program_start_time, game_date, game_time):
     game_month_number = months_abbr[game_month]
     game_day_number = int(game_date_split[2])
 
-    game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
+    #game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
+    game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number)
 
-    program_start_time = datetime(year=2020, month=1, day=24, hour=6, minute=20)    #remove this, just for testing
-    return game_datetime > program_start_time
+    #program_start_time = datetime(year=2020, month=1, day=24, hour=6, minute=20)    #remove this, just for testing
+    program_start_time = datetime(year=2020, month=1, day=29)
+    return game_datetime < program_start_time
 
 
 def get_model_inputs(full_games_soup, single_year_stats, year):
@@ -144,7 +146,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, game_date, single_game['game_start_time']):
+        if not is_game_in_past(start_time, game_date, single_game['game_start_time']):
             return inputs, outputs, stat_names_used
 
         #not done by winner and loser, honestly dont think i care -> just predicting team1 score vs team2 score
@@ -176,12 +178,15 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
     return inputs, outputs, stat_names_used
 
 
-def predict_weekly_scores(linear_regression_model, predict_end_date): #use today's date to get month of game
+def predict_weekly_scores(linear_regression_model, start_time, predict_end_date):
+    #need to pass in midnight for predict_end_date
+    #use today's date to get month of game in below
     future_games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', 'January'), 'rb')
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
 
     games_table = future_games_soup.find_all('table', id='schedule')[0]
-    for game_row in games_table.find_all('tbody')[0].find_all('tr'):
+    game_rows = games_table.find_all('tbody')[0].find_all('tr')
+    for game_row in game_rows:
         game_date = game_row.find('th').a.text
         game_date_split = game_date.replace(',', '').split()
         game_year = int(game_date_split[3])
@@ -191,8 +196,10 @@ def predict_weekly_scores(linear_regression_model, predict_end_date): #use today
 
         game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number)
 
-        if game_datetime > predict_end_date:
-            return
+        start_time = datetime(year=2020,month=1,day=30) #fix this to set start time to midnight of current day automatically
+
+        if game_datetime > predict_end_date or game_datetime < start_time:
+            continue
         else:
             team1_off_inputs = []
             team1_def_inputs = []
@@ -276,8 +283,8 @@ model = LinearRegression().fit(x, y)
 
 #dataset = pd.read_csv('C:\\Users\\bobna\\OneDrive\\Documents') #missing a parser file?
 
-#coeff_df = pd.DataFrame(model.coef_, stat_names_used, columns=['Coefficient'])
-#print(coeff_df)
+coeff_df = pd.DataFrame(model.coef_, stat_names_used, columns=['Coefficient'])
+print(coeff_df)
 
 r_sq = model.score(x, y)
 print('coefficient of determination:', r_sq)
@@ -286,8 +293,7 @@ print('slope:', model.coef_)
 
 tomorrow = start_time + timedelta(days=1)
 
-predict_weekly_scores(model, tomorrow) #left off here, want to predict everything on the days prior to 'two_days'
-#need to pass in midnight on the date above
+predict_weekly_scores(model, start_time, tomorrow)
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
@@ -298,6 +304,6 @@ for num_stat in range(0, len(x_input[0])):
     plt.scatter(x_plot, y_input)
     plt.xlabel(x_label)
     plt.ylabel('single game points')
-    plt.show()
+    #plt.show()
 
 print('Completed!')
