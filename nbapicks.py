@@ -20,7 +20,7 @@ months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'J
 months_abbr = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
 season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'April':4}
 
-start_time = datetime.now()
+run_date = datetime.date(datetime.now())
 
 off_stat_names_to_use = {
 }
@@ -97,29 +97,16 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_past(program_start_time, game_date, game_time):
-    game_time_split = game_time.split(':')
-    game_hours = int(game_time_split[0])
-    game_minutes = int(game_time_split[1][:2])
-    game_am_pm = game_time_split[1][2:]
-
-    if game_am_pm == 'p' and game_hours != 12:
-        game_hours += 12
-    elif game_am_pm == 'a' and game_hours == 12:
-        game_hours = 0
-
+def is_game_in_past(run_date, game_date):
     game_date_split = game_date.replace(',', '').split()
     game_year = int(game_date_split[3])
     game_month = game_date_split[1]
     game_month_number = months_abbr[game_month]
     game_day_number = int(game_date_split[2])
 
-    #game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
-    game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number)
+    game_datetime = datetime.date(datetime(year=game_year, month=game_month_number, day=game_day_number))
 
-    #program_start_time = datetime(year=2020, month=1, day=24, hour=6, minute=20)    #remove this, just for testing
-    program_start_time = datetime(year=2020, month=1, day=29)
-    return game_datetime < program_start_time
+    return game_datetime < run_date
 
 
 def get_model_inputs(full_games_soup, single_year_stats, year):
@@ -146,7 +133,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if not is_game_in_past(start_time, game_date, single_game['game_start_time']):
+        if not is_game_in_past(run_date, game_date):
             return inputs, outputs, stat_names_used
 
         #not done by winner and loser, honestly dont think i care -> just predicting team1 score vs team2 score
@@ -178,7 +165,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
     return inputs, outputs, stat_names_used
 
 
-def predict_weekly_scores(linear_regression_model, start_time, predict_end_date):
+def predict_weekly_scores(linear_regression_model, run_date, predict_end_date):
     #need to pass in midnight for predict_end_date
     #use today's date to get month of game in below
     future_games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', 'January'), 'rb')
@@ -194,11 +181,9 @@ def predict_weekly_scores(linear_regression_model, start_time, predict_end_date)
         game_month_number = months_abbr[game_month]
         game_day_number = int(game_date_split[2])
 
-        game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number)
+        game_datetime = datetime.date(datetime(year=game_year, month=game_month_number, day=game_day_number))
 
-        start_time = datetime(year=2020,month=1,day=30) #fix this to set start time to midnight of current day automatically
-
-        if game_datetime > predict_end_date or game_datetime < start_time:
+        if game_datetime > predict_end_date or game_datetime < run_date:
             continue
         else:
             team1_off_inputs = []
@@ -291,13 +276,13 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-tomorrow = start_time + timedelta(days=1)
+tomorrow = run_date + timedelta(days=1)
 
-predict_weekly_scores(model, start_time, tomorrow)
+predict_weekly_scores(model, run_date, tomorrow)
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
-    x_label = stat_names_used[num_stat] #empty when it gets here
+    x_label = stat_names_used[num_stat]
     for outcome in range(0, len(x_input)):
         x_plot.append(x_input[outcome][num_stat])
 
