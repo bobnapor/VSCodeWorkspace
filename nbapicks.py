@@ -18,6 +18,7 @@ stats_template = file_dir + 'yyyy-yy NBA Season Summary _ Basketball-Reference.c
 
 months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'July':7, 'August':8, 'September':9, 'October':10, 'November':11, 'December':12}
 months_abbr = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
+number_months = {1:'January', 2:'February', 3:'March', 4:'April', 5:'May', 6:'June', 7:'July', 8:'August', 9:'September', 10:'October', 11:'November', 12:'December'}
 season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'April':4}
 
 run_date = datetime.date(datetime.now())
@@ -168,7 +169,8 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
 def predict_weekly_scores(linear_regression_model, run_date, predict_end_date):
     #need to pass in midnight for predict_end_date
     #use today's date to get month of game in below
-    future_games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', 'January'), 'rb')
+    current_month = number_months[run_date.month]
+    future_games_file = open(games_template.replace('yyyy', str(year)).replace('yy', next_year).replace('month', current_month), 'rb')
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
 
     games_table = future_games_soup.find_all('table', id='schedule')[0]
