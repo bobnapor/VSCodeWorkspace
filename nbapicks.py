@@ -19,7 +19,9 @@ stats_template = file_dir + 'yyyy-yy NBA Season Summary _ Basketball-Reference.c
 months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'July':7, 'August':8, 'September':9, 'October':10, 'November':11, 'December':12}
 months_abbr = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
 number_months = {1:'January', 2:'February', 3:'March', 4:'April', 5:'May', 6:'June', 7:'July', 8:'August', 9:'September', 10:'October', 11:'November', 12:'December'}
-season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'April':4}
+season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'July':7, 'August':8}
+
+# 'April':4, 'May':5, 'June':6
 
 run_date = datetime.date(datetime.now())
 
@@ -71,7 +73,7 @@ def get_off_stats(full_offense_soup):
                 for offense_column in offense_row.find_all('td'):
                     column_name = offense_column['data-stat']
                     single_team_offense[column_name] = offense_column.text
-                team = single_team_offense['team_name']
+                team = single_team_offense['team_name'].replace('*','')
                 single_year_offense[team] = single_team_offense
                 print('Extracted offensive data for the ' + str(year) + ' ' + team)
     return single_year_offense
@@ -92,7 +94,7 @@ def get_def_stats(full_defense_soup):
                 for defense_column in defense_row.find_all('td'):
                     column_name = defense_column['data-stat']
                     single_team_defense[column_name] = defense_column.text
-                team = single_team_defense['team_name']
+                team = single_team_defense['team_name'].replace('*','')
                 single_year_defense[team] = single_team_defense
                 print('Extracted defensive data for the ' + str(year) + ' ' + team)
     return single_year_defense
@@ -220,7 +222,7 @@ def predict_weekly_scores(linear_regression_model, run_date, predict_end_date):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print('Date:' + str(game_datetime) + ':' + team1 + ':' + str(team1_pred[0]) + ':' + team2 + ':' + str(team2_pred[0]))
+            print(str(game_datetime) + ':' + team1 + ':' + str(round(team1_pred[0],2)) + ':' + team2 + ':' + str(round(team2_pred[0],2)))
 
 
 year_stats = dict()
@@ -281,6 +283,10 @@ print('slope:', model.coef_)
 tomorrow = run_date + timedelta(days=1)
 
 predict_weekly_scores(model, run_date, tomorrow)
+
+#start_range = datetime.date(datetime(year=2020, month=2, day=28)) # pick rest of 1/31
+#tomorrow = datetime.date(datetime(year=2020, month=2, day=8)) # pick rest of 1/31
+#predict_weekly_scores(model, start_range, tomorrow)
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
