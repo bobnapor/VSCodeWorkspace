@@ -125,6 +125,9 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         loser_def_inputs = []
         single_game = dict()
 
+        if (game_row.text == 'Playoffs'):
+            continue
+
         game_date = game_row.find('th').a.text
         single_game['game_date'] = game_date
         game_stat_columns = game_row.find_all('td')
@@ -177,7 +180,10 @@ def predict_weekly_scores(linear_regression_model, run_date, predict_end_date):
 
     games_table = future_games_soup.find_all('table', id='schedule')[0]
     game_rows = games_table.find_all('tbody')[0].find_all('tr')
+
     for game_row in game_rows:
+        if (game_row.text == 'Playoffs'):
+            continue
         game_date = game_row.find('th').a.text
         game_date_split = game_date.replace(',', '').split()
         game_year = int(game_date_split[3])
