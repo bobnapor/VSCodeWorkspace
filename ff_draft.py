@@ -22,7 +22,7 @@ import pandas as pd
 import csv
 import sys
 import os.path
-import time
+from datetime import datetime
 
 
 def write_draft_pick(file_name, player_name, drafted_price):
@@ -40,9 +40,9 @@ def compute_player_value(player, extra_point_value):
 
 
 def write_player_vals(players_idx):
-    timestr = time.strftime("%Y%m%d-%H%M%S")
-    filename = 'C:/Users/Bobby/Documents/draft_values_{}.csv'.format(timestr)
-    with open(filename, 'a', newline='') as csvfile:
+    timestr = datetime.now().strftime('%Y%m%d-%H_%M_%S_%f')[:-3]
+    filename = 'C:/Users/Bobby/Documents/fantasyfootball/output/draft_values_{}.csv'.format(timestr)
+    with open(filename, 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
         header = ['NAME', 'TEAM', 'POS', 'PPG', 'EXTRA_PPG', 'VALUE']
         csvwriter.writerow(header)
@@ -165,8 +165,8 @@ def main(file_path):
     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
     update_all_player_vals(players_idx, extra_point_val)
 
-    keepers_file = 'C:/Users/Bobby/Documents/ff_2020_keepers.csv'
-    draft_picks_file = 'C:/Users/Bobby/Documents/draft_picks.csv'
+    keepers_file = 'C:/Users/Bobby/Documents/fantasyfootball/input/ff_2020_keepers.csv'
+    draft_picks_file = 'C:/Users/Bobby/Documents/fantasyfootball/output/draft_picks.csv'
 
     (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(keepers_file, players_idx, baselines, total_extra_dollars, total_extra_ppg)
     (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(draft_picks_file, players_idx, baselines, total_extra_dollars, total_extra_ppg)
@@ -200,4 +200,4 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         main(sys.argv[1])
     else:
-        main('C:/Users/Bobby/Documents/ff_2020_players.xlsx')
+        main('C:/Users/Bobby/Documents/fantasyfootball/input/ff_2020_players.xlsx')
