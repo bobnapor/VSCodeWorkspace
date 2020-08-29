@@ -21,6 +21,7 @@ root.mainloop()
 import pandas as pd
 import csv
 import sys
+import os.path
 
 
 def write_draft_pick(player_name, drafted_price):
@@ -81,11 +82,11 @@ def gather_baselines(players_idx):
         count = pos_player_counts[position]
         is_baseline = False
 
-        if position == 'QB' and count == 30:
+        if position == 'QB' and count == 20:
             is_baseline = True
-        elif position == 'RB' and count == 50:
+        elif position == 'RB' and count == 30:
             is_baseline = True
-        elif position == 'WR' and count == 50:
+        elif position == 'WR' and count == 30:
             is_baseline = True
         elif position == 'TE' and count == 10:
             is_baseline = True
@@ -107,19 +108,22 @@ def read_players(file_path):
 
 def replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg):
     print('Replaying any previously occured picks...')
-    with open('C:/Users/Bobby/Documents/draft_picks.csv', 'r', newline='') as csvfile:
-        draft_pick_reader = csv.reader(csvfile)
-        for row in draft_pick_reader:
-            pick_name = row[0]
-            pick_price = row[1]
+    file_path = 'C:/Users/Bobby/Documents/draft_picks.csv'
+    extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
+    if os.path.exists(file_path):
+        with open(file_path, 'r', newline='') as csvfile:
+            draft_pick_reader = csv.reader(csvfile)
+            for row in draft_pick_reader:
+                pick_name = row[0]
+                pick_price = row[1]
 
-            player_removed = remove_drafted_player(players_idx, pick_name)
+                player_removed = remove_drafted_player(players_idx, pick_name)
 
-            if player_removed:
-                total_extra_ppg = gather_extra_points(players_idx, baselines)
-                total_extra_dollars -= int(pick_price)
-                extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-                write_player_values(players_idx, extra_point_val)
+                if player_removed:
+                    total_extra_ppg = gather_extra_points(players_idx, baselines)
+                    total_extra_dollars -= int(pick_price)
+                    extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
+                    write_player_values(players_idx, extra_point_val)
     return (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val)
 
 
