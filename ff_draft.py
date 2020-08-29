@@ -32,10 +32,12 @@ def write_draft_pick(file_name, player_name, drafted_price):
         csvwriter.writerow(draft_pick_iter)
 
 
-def compute_player_value(player, extra_point_value):
+def compute_player_value(player, extra_point_value, extra_ppg_by_pos):
     extra_ppg = player['EXTRA_PPG']
     player_value = (extra_point_value * extra_ppg) + 1
     player['VALUE'] = round(player_value)
+    pos_rel_value = extra_ppg / extra_ppg_by_pos[player['POS']]
+    player['POS_REL_VALUE'] = '{0:.0f}%'.format(pos_rel_value*100)
     return player
 
 
@@ -44,7 +46,7 @@ def write_player_vals(players_idx):
     filename = 'C:/Users/Bobby/Documents/fantasyfootball/output/draft_values_{}.csv'.format(timestr)
     with open(filename, 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
-        header = ['NAME', 'TEAM', 'POS', 'PPG', 'EXTRA_PPG', 'VALUE']
+        header = ['NAME', 'TEAM', 'POS', 'PPG', 'EXTRA_PPG', 'VALUE', 'POS_REL_VALUE']
         csvwriter.writerow(header)
         for player in players_idx.values():
             name = player['NAME']
@@ -53,13 +55,14 @@ def write_player_vals(players_idx):
             ppg = player['PPG']
             extra_ppg = player['EXTRA_PPG']
             value = player['VALUE']
-            player_iter = [name, team, pos, ppg, extra_ppg, value]
+            pos_rel_value = player['POS_REL_VALUE']
+            player_iter = [name, team, pos, ppg, extra_ppg, value, pos_rel_value]
             csvwriter.writerow(player_iter)
 
 
-def update_all_player_vals(players_idx, extra_point_value):
+def update_all_player_vals(players_idx, extra_point_value, extra_ppg_by_pos):
     for idx in players_idx:
-        compute_player_value(players_idx[idx], extra_point_value)
+        compute_player_value(players_idx[idx], extra_point_value, extra_ppg_by_pos)
     write_player_vals(players_idx)
 
 
@@ -70,19 +73,27 @@ def get_extra_point_val(total_extra_dollars, total_extra_ppg):
 
 def gather_extra_points(players_idx, baselines):
     total_extra_ppg = 0
+    extra_ppg_by_pos = dict()
 
     for idx in players_idx:
         player = players_idx[idx]
+        extra_ppg_col = 'EXTRA_PPG'
         position = player['POS']
         ppg = player['PPG']
         extra_ppg = ppg - baselines[position]
         if extra_ppg > 0:
-            player['EXTRA_PPG'] = extra_ppg
+            player[extra_ppg_col] = extra_ppg
         else:
-            player['EXTRA_PPG'] = 0
-        total_extra_ppg += player['EXTRA_PPG']
+            player[extra_ppg_col] = 0
 
-    return total_extra_ppg
+        if position in extra_ppg_by_pos:
+            extra_ppg_by_pos[position] += player[extra_ppg_col]
+        else:
+            extra_ppg_by_pos[position] = player[extra_ppg_col]
+
+        total_extra_ppg += player[extra_ppg_col]
+
+    return (total_extra_ppg, extra_ppg_by_pos)
 
 
 def gather_baselines(players_idx):
@@ -138,10 +149,10 @@ def replay_picks(file_name, players_idx, baselines, total_extra_dollars, total_e
 
                 if player_removed:
                     print('Successfully removed {} for {}'.format(pick_name, pick_price))
-                    total_extra_ppg = gather_extra_points(players_idx, baselines)
+                    (total_extra_ppg, extra_ppg_by_pos) = gather_extra_points(players_idx, baselines)
                     total_extra_dollars -= int(pick_price)
                     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-                    update_all_player_vals(players_idx, extra_point_val)
+                    update_all_player_vals(players_idx, extra_point_val, extra_ppg_by_pos)
     return (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val)
 
 
@@ -161,9 +172,9 @@ def main(file_path):
     total_extra_dollars = (10 * 200) - (10 * 16)
     players_idx = read_players(file_path)
     baselines = gather_baselines(players_idx)
-    total_extra_ppg = gather_extra_points(players_idx, baselines)
+    (total_extra_ppg, extra_ppg_by_pos) = gather_extra_points(players_idx, baselines)
     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-    update_all_player_vals(players_idx, extra_point_val)
+    update_all_player_vals(players_idx, extra_point_val, extra_ppg_by_pos)
 
     keepers_file = 'C:/Users/Bobby/Documents/fantasyfootball/input/ff_2020_keepers.csv'
     draft_picks_file = 'C:/Users/Bobby/Documents/fantasyfootball/output/draft_picks.csv'
@@ -185,10 +196,10 @@ def main(file_path):
 
         if player_removed:
             print('Successfully removed {} for {}'.format(player_drafted, drafted_price))
-            total_extra_ppg = gather_extra_points(players_idx, baselines)
+            (total_extra_ppg, extra_ppg_by_pos) = gather_extra_points(players_idx, baselines)
             total_extra_dollars -= int(drafted_price)
             extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-            update_all_player_vals(players_idx, extra_point_val)
+            update_all_player_vals(players_idx, extra_point_val, extra_ppg_by_pos)
             write_draft_pick(draft_picks_file, player_drafted, drafted_price)
         else:
             print('Player not found, try again')
