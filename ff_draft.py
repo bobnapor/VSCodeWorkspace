@@ -25,9 +25,8 @@ import os.path
 import time
 
 
-def write_draft_pick(player_name, drafted_price):
-    filename = 'C:/Users/Bobby/Documents/draft_picks.csv'
-    with open(filename, 'a', newline='') as csvfile:
+def write_draft_pick(file_name, player_name, drafted_price):
+    with open(file_name, 'a', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
         draft_pick_iter = [player_name, drafted_price]
         csvwriter.writerow(draft_pick_iter)
@@ -125,20 +124,20 @@ def read_players(file_path):
     return players_idx
 
 
-def replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg):
-    print('Replaying any previously occured picks...')
-    file_path = 'C:/Users/Bobby/Documents/draft_picks.csv'
+def replay_picks(file_name, players_idx, baselines, total_extra_dollars, total_extra_ppg):
+    print('Replaying any previously occured picks from ' + file_name)
     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-    if os.path.exists(file_path):
-        with open(file_path, 'r', newline='') as csvfile:
+    if os.path.exists(file_name):
+        with open(file_name, 'r', newline='') as csvfile:
             draft_pick_reader = csv.reader(csvfile)
             for row in draft_pick_reader:
                 pick_name = row[0]
                 pick_price = row[1]
-
+                print('Attempting to remove {} for {}'.format(pick_name, pick_price))
                 player_removed = remove_drafted_player(players_idx, pick_name)
 
                 if player_removed:
+                    print('Successfully removed {} for {}'.format(pick_name, pick_price))
                     total_extra_ppg = gather_extra_points(players_idx, baselines)
                     total_extra_dollars -= int(pick_price)
                     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
@@ -166,9 +165,15 @@ def main(file_path):
     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
     update_all_player_vals(players_idx, extra_point_val)
 
-    (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg)
+    keepers_file = 'C:/Users/Bobby/Documents/ff_2020_keepers.csv'
+    draft_picks_file = 'C:/Users/Bobby/Documents/draft_picks.csv'
+
+    (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(keepers_file, players_idx, baselines, total_extra_dollars, total_extra_ppg)
+    (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(draft_picks_file, players_idx, baselines, total_extra_dollars, total_extra_ppg)
 
     while True:
+        if total_extra_dollars <= 0:
+            break
         player_drafted = input('Player Drafted: ')
         if player_drafted.lower() == 'quit':
             break
@@ -179,11 +184,12 @@ def main(file_path):
         player_removed = remove_drafted_player(players_idx, player_drafted)
 
         if player_removed:
+            print('Successfully removed {} for {}'.format(player_drafted, drafted_price))
             total_extra_ppg = gather_extra_points(players_idx, baselines)
             total_extra_dollars -= int(drafted_price)
             extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
             update_all_player_vals(players_idx, extra_point_val)
-            write_draft_pick(player_drafted, drafted_price)
+            write_draft_pick(draft_picks_file, player_drafted, drafted_price)
         else:
             print('Player not found, try again')
 
@@ -195,7 +201,3 @@ if __name__ == '__main__':
         main(sys.argv[1])
     else:
         main('C:/Users/Bobby/Documents/ff_2020_players.xlsx')
-
-    """TODO: 
-        a) improve how i view the updated data
-        b) add rarity index to show how much better a player is than the rest of his position"""
