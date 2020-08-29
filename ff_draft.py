@@ -98,6 +98,8 @@ with open(filename, 'w', newline='') as csvfile:
         player_value_iter = [player['NAME'], player_value]
         csvwriter.writerow(player_value_iter)
 
+test = input("please type something")
+print(test)
 
 print(players_idx)
 print('Completed!')
