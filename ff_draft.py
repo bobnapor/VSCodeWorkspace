@@ -23,6 +23,14 @@ import csv
 import sys
 
 
+def write_draft_pick(player_name, drafted_price):
+    filename = 'C:/Users/Bobby/Documents/draft_picks.csv'
+    with open(filename, 'a', newline='') as csvfile:
+        csvwriter = csv.writer(csvfile)
+        draft_pick_iter = [player_name, drafted_price]
+        csvwriter.writerow(draft_pick_iter)
+
+
 def write_player_values(players_idx, extra_point_value):
     filename = 'C:/Users/Bobby/Documents/player_values.csv'
     with open(filename, 'w', newline='') as csvfile:
@@ -97,13 +105,64 @@ def read_players(file_path):
     return players_idx
 
 
+def replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg):
+    print('Replaying any previously occured picks...')
+    with open('C:/Users/Bobby/Documents/draft_picks.csv', 'r', newline='') as csvfile:
+        draft_pick_reader = csv.reader(csvfile)
+        for row in draft_pick_reader:
+            pick_name = row[0]
+            pick_price = row[1]
+
+            player_removed = remove_drafted_player(players_idx, pick_name)
+
+            if player_removed:
+                total_extra_ppg = gather_extra_points(players_idx, baselines)
+                total_extra_dollars -= int(pick_price)
+                extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
+                write_player_values(players_idx, extra_point_val)
+    return (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val)
+
+
+def remove_drafted_player(players_idx, player_drafted):
+    player_found = False
+    for idx in players_idx:
+        player = players_idx[idx]
+        if player['NAME'] == player_drafted:
+            del players_idx[idx]
+            player_found = True
+            break
+    return player_found
+
+
 def main(file_path):
+    print('Initializing data...')
     total_extra_dollars = (10 * 200) - (10 * 16)
     players_idx = read_players(file_path)
     baselines = gather_baselines(players_idx)
     total_extra_ppg = gather_extra_points(players_idx, baselines)
     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
     write_player_values(players_idx, extra_point_val)
+
+    (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg)
+
+    while True:
+        player_drafted = input('Player Drafted: ')
+        if player_drafted.lower() == 'quit':
+            break
+        drafted_price = input('Drafted Price: ')
+        if drafted_price.lower() == 'quit':
+            break
+
+        player_removed = remove_drafted_player(players_idx, player_drafted)
+
+        if player_removed:
+            total_extra_ppg = gather_extra_points(players_idx, baselines)
+            total_extra_dollars -= int(drafted_price)
+            extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
+            write_player_values(players_idx, extra_point_val)
+            write_draft_pick(player_drafted, drafted_price)
+        else:
+            print('Player not found, try again')
 
     print('Completed!')
 
