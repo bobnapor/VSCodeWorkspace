@@ -1,5 +1,5 @@
 """
-TODO:Put in later for basic UI
+TODO: Put in later for basic UI
 import tkinter as tk
 from tkinter import filedialog
 def getExcel():
