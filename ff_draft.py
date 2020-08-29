@@ -22,6 +22,7 @@ import pandas as pd
 import csv
 import sys
 import os.path
+import time
 
 
 def write_draft_pick(player_name, drafted_price):
@@ -32,17 +33,35 @@ def write_draft_pick(player_name, drafted_price):
         csvwriter.writerow(draft_pick_iter)
 
 
-def write_player_values(players_idx, extra_point_value):
-    filename = 'C:/Users/Bobby/Documents/player_values.csv'
-    with open(filename, 'w', newline='') as csvfile:
+def compute_player_value(player, extra_point_value):
+    extra_ppg = player['EXTRA_PPG']
+    player_value = (extra_point_value * extra_ppg) + 1
+    player['VALUE'] = round(player_value)
+    return player
+
+
+def write_player_vals(players_idx):
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    filename = 'C:/Users/Bobby/Documents/draft_values_{}.csv'.format(timestr)
+    with open(filename, 'a', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
-        for idx in players_idx:
-            player = players_idx[idx]
+        header = ['NAME', 'TEAM', 'POS', 'PPG', 'EXTRA_PPG', 'VALUE']
+        csvwriter.writerow(header)
+        for player in players_idx.values():
+            name = player['NAME']
+            team = player['TEAM']
+            pos = player['POS']
+            ppg = player['PPG']
             extra_ppg = player['EXTRA_PPG']
-            player_value = (extra_point_value * extra_ppg) + 1
-            player['VALUE'] = player_value
-            player_value_iter = [player['NAME'], player_value]
-            csvwriter.writerow(player_value_iter)
+            value = player['VALUE']
+            player_iter = [name, team, pos, ppg, extra_ppg, value]
+            csvwriter.writerow(player_iter)
+
+
+def update_all_player_vals(players_idx, extra_point_value):
+    for idx in players_idx:
+        compute_player_value(players_idx[idx], extra_point_value)
+    write_player_vals(players_idx)
 
 
 def get_extra_point_val(total_extra_dollars, total_extra_ppg):
@@ -123,7 +142,7 @@ def replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg):
                     total_extra_ppg = gather_extra_points(players_idx, baselines)
                     total_extra_dollars -= int(pick_price)
                     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-                    write_player_values(players_idx, extra_point_val)
+                    update_all_player_vals(players_idx, extra_point_val)
     return (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val)
 
 
@@ -145,7 +164,7 @@ def main(file_path):
     baselines = gather_baselines(players_idx)
     total_extra_ppg = gather_extra_points(players_idx, baselines)
     extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-    write_player_values(players_idx, extra_point_val)
+    update_all_player_vals(players_idx, extra_point_val)
 
     (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val) = replay_picks(players_idx, baselines, total_extra_dollars, total_extra_ppg)
 
@@ -163,7 +182,7 @@ def main(file_path):
             total_extra_ppg = gather_extra_points(players_idx, baselines)
             total_extra_dollars -= int(drafted_price)
             extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-            write_player_values(players_idx, extra_point_val)
+            update_all_player_vals(players_idx, extra_point_val)
             write_draft_pick(player_drafted, drafted_price)
         else:
             print('Player not found, try again')
@@ -176,3 +195,7 @@ if __name__ == '__main__':
         main(sys.argv[1])
     else:
         main('C:/Users/Bobby/Documents/ff_2020_players.xlsx')
+
+    """TODO: 
+        a) improve how i view the updated data
+        b) add rarity index to show how much better a player is than the rest of his position"""
