@@ -123,7 +123,7 @@ def get_def_stats(full_defense_soup):   #combine with above - parameterize offen
     return single_year_defense
 
 
-def is_game_in_future(program_start_time, game_year, game_date, game_time):
+def is_game_in_future(program_start_time, game_date, game_time):
     game_time_split = game_time.split(':')
     game_hours = int(game_time_split[0])
     game_minutes = int(game_time_split[1][:2])
@@ -135,6 +135,7 @@ def is_game_in_future(program_start_time, game_year, game_date, game_time):
         game_hours = 0
 
     game_date_split = game_date.split()
+    game_year = int(game_date_split[2])
     game_month = game_date_split[0]
     game_month_number = months[game_month]
     game_day_number = int(game_date_split[1].replace(',', '')) #strip comma
@@ -169,7 +170,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             else:
                 single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, year, single_game['date_game'], single_game['time_game']):
+        if is_game_in_future(start_time, single_game['date_game'], single_game['time_game']):
             return inputs, outputs, stat_names_used
 
         winner = single_game['winner_school_name']
@@ -199,6 +200,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         loser_inputs.extend(winner_def_inputs)
 
         #print(single_game)
+
         winner_score = int(single_game['winner_points'])
         loser_score = int(single_game['loser_points'])
         inputs.append(winner_inputs)
@@ -209,7 +211,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2019'))
+    future_games_file = open(games_template.replace('yyyy', '2020'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
 
     games_table = future_games_soup.find_all('table', id='schedule')[0]
@@ -228,7 +230,9 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
             else:
                 game_to_predict[game_column_name] = game_stat_column.text
 
-        if game_to_predict['week_number'] != week_num_target:
+        if not is_game_in_future(start_time, game_to_predict['date_game'], game_to_predict['time_game']):
+            continue
+        elif game_to_predict['week_number'] != week_num_target:
             continue
         else:
             team1_off_inputs = []
@@ -242,22 +246,28 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
                 team1 = variable_school_names[team1]
             if team2 in variable_school_names:
                 team2 = variable_school_names[team2]
-            team1_year_stats = year_stats[2019][team1]
-            team2_year_stats = year_stats[2019][team2]
 
-            populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
-            populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
+            team1StatsPresent = team1 in year_stats[2019]
+            team2StatsPresent = team2 in year_stats[2019]
+            if not team1StatsPresent or not team2StatsPresent:
+                print(str(game_to_predict['date_game']) + ' ' + game_to_predict['time_game'] + '|' + team1 + '|' + str(team1StatsPresent) + '|' + team2 + '|' + str(team2StatsPresent))
+            else:
+                team1_year_stats = year_stats[2019][team1]
+                team2_year_stats = year_stats[2019][team2]
 
-            team1_off_inputs.extend(team2_def_inputs)
-            team2_off_inputs.extend(team1_def_inputs)
-            team1_inputs = []
-            team2_inputs = []
-            team1_inputs.append(team1_off_inputs)
-            team2_inputs.append(team2_off_inputs)
+                populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
+                populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
 
-            team1_pred = linear_regression_model.predict(team1_inputs)
-            team2_pred = linear_regression_model.predict(team2_inputs)
-            print(team1, ':', str(team1_pred[0]), ':', team2, ':', str(team2_pred[0]))
+                team1_off_inputs.extend(team2_def_inputs)
+                team2_off_inputs.extend(team1_def_inputs)
+                team1_inputs = []
+                team2_inputs = []
+                team1_inputs.append(team1_off_inputs)
+                team2_inputs.append(team2_off_inputs)
+
+                team1_pred = linear_regression_model.predict(team1_inputs)
+                team2_pred = linear_regression_model.predict(team2_inputs)
+                print(str(game_to_predict['date_game']) + ' ' + game_to_predict['time_game'] + '|' + team1 + '|' + str(round(team1_pred[0],2)) + '|' + team2 + '|' + str(round(team2_pred[0],2)))
 
 
 year_stats = dict()
@@ -311,9 +321,7 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-weeks_to_predict = ('18', '19', '20', '21') #bowls are 18, 19, 20, 21
-for week_number in weeks_to_predict:
-    predict_weekly_scores(model, week_number)
+predict_weekly_scores(model, '1')
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
