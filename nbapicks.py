@@ -19,7 +19,7 @@ stats_template = file_dir + 'yyyy-yy NBA Season Summary _ Basketball-Reference.c
 months = {'January':1, 'February':2, 'March':3, 'April':4, 'May':5, 'June':6, 'July':7, 'August':8, 'September':9, 'October':10, 'November':11, 'December':12}
 months_abbr = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
 number_months = {1:'January', 2:'February', 3:'March', 4:'April', 5:'May', 6:'June', 7:'July', 8:'August', 9:'September', 10:'October', 11:'November', 12:'December'}
-season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'July':7, 'August':8}
+season_months = {'October':10, 'November':11, 'December':12, 'January':1, 'February':2, 'March':3, 'July':7, 'August':8, 'September':9}
 
 # 'April':4, 'May':5, 'June':6
 
@@ -272,8 +272,11 @@ for year in range(2019, 2020):
         for output_score in outputs:
             y_input.append(output_score)
 
-
+input_weights = np.ones(len(x_input))
+input_weights[-100:-10] *= 2
+input_weights[-10:] *= 3
 x, y = np.array(x_input), np.array(y_input)
+model_weighted = LinearRegression().fit(x, y, input_weights)
 model = LinearRegression().fit(x, y)
 
 #dataset = pd.read_csv('C:\\Users\\bobna\\OneDrive\\Documents') #missing a parser file?
@@ -286,9 +289,19 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
+
+coeff_df_weighted = pd.DataFrame(model_weighted.coef_, stat_names_used, columns=['Coefficient'])
+print(coeff_df_weighted)
+
+r_sq_weighted = model_weighted.score(x, y)
+print('coefficient of determination:', r_sq_weighted)
+print('intercept:', model_weighted.intercept_)
+print('slope:', model_weighted.coef_)
+
 tomorrow = run_date + timedelta(days=1)
 
 predict_weekly_scores(model, run_date, tomorrow)
+predict_weekly_scores(model_weighted, run_date, tomorrow)
 
 #start_range = datetime.date(datetime(year=2020, month=2, day=28)) # pick rest of 1/31
 #tomorrow = datetime.date(datetime(year=2020, month=2, day=8)) # pick rest of 1/31
