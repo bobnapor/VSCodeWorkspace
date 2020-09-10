@@ -136,7 +136,7 @@ def is_game_in_future(program_start_time, game_year, game_date, game_time):
 
     return game_datetime > program_start_time
 
-
+#ideas - get rid of week 17...and include playoffs
 def get_model_inputs(full_games_soup, single_year_stats, year):
     game_counter = 0
     games_table = full_games_soup.find_all('table', id='games')[0]
@@ -195,7 +195,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2019'))
+    future_games_file = open(games_template.replace('yyyy', '2020'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
     games_table = future_games_soup.find_all('table', id='games')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
@@ -220,8 +220,16 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
                 game_column_name = game_stat_column['data-stat']
                 game_to_predict[game_column_name] = game_stat_column.text
 
-            team1 = game_to_predict['winner']
-            team2 = game_to_predict['loser']
+            team1 = game_to_predict['visitor_team']
+            team2 = game_to_predict['home_team']
+            if team1 == 'Las Vegas Raiders':
+                team1 = 'Oakland Raiders'
+            elif team2 == 'Las Vegas Raiders':
+                team2 = 'Oakland Raiders'
+            if team1 == 'Washington Football Team':
+                team1 = 'Washington Redskins'
+            elif team2 == 'Washington Football Team':
+                team2 = 'Washington Redskins'
             team1_year_stats = year_stats[2019][team1]
             team2_year_stats = year_stats[2019][team2]
 
@@ -237,7 +245,7 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print(team1 + ':' + str(team1_pred[0]) + ':' + team2 + ':' + str(team2_pred[0]))
+            print(str(game_to_predict['boxscore_word']) + ' ' + game_to_predict['gametime'] + '|' + team1 + '|' + str(round(team1_pred[0],2)) + '|' + team2 + '|' + str(round(team2_pred[0],2)))
 
 
 year_stats = dict()
@@ -291,7 +299,7 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, 'WildCard')
+predict_weekly_scores(model, '1')
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
