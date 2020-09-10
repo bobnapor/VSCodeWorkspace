@@ -142,17 +142,18 @@ def replay_picks(file_name, players_idx, baselines, total_extra_dollars, total_e
         with open(file_name, 'r', newline='') as csvfile:
             draft_pick_reader = csv.reader(csvfile)
             for row in draft_pick_reader:
-                pick_name = row[0]
-                pick_price = row[1]
-                print('Attempting to remove {} for {}'.format(pick_name, pick_price))
-                player_removed = remove_drafted_player(players_idx, pick_name)
+                if len(row) > 0:
+                    pick_name = row[0]
+                    pick_price = row[1]
+                    print('Attempting to remove {} for {}'.format(pick_name, pick_price))
+                    player_removed = remove_drafted_player(players_idx, pick_name)
 
-                if player_removed:
-                    print('Successfully removed {} for {}'.format(pick_name, pick_price))
-                    (total_extra_ppg, extra_ppg_by_pos) = gather_extra_points(players_idx, baselines)
-                    total_extra_dollars -= int(pick_price)
-                    extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
-                    update_all_player_vals(players_idx, extra_point_val, extra_ppg_by_pos)
+                    if player_removed:
+                        print('Successfully removed {} for {}'.format(pick_name, pick_price))
+                        (total_extra_ppg, extra_ppg_by_pos) = gather_extra_points(players_idx, baselines)
+                        total_extra_dollars -= int(pick_price)
+                        extra_point_val = get_extra_point_val(total_extra_dollars, total_extra_ppg)
+                        update_all_player_vals(players_idx, extra_point_val, extra_ppg_by_pos)
     return (players_idx, total_extra_dollars, total_extra_ppg, extra_point_val)
 
 
