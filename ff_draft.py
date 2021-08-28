@@ -40,7 +40,7 @@ def compute_player_value(player, extra_point_value, extra_ppg_by_pos):
         pos_rel_value = 0
     else:
         pos_rel_value = extra_ppg / extra_ppg_by_pos[player['POS']]
-    player['POS_REL_VALUE'] = '{0:.0f}%'.format(pos_rel_value*100)
+    player['POS_REL_VALUE'] = '{0:.0f}%'.format(pos_rel_value * 100)
     return player
 
 
