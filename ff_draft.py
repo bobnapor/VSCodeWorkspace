@@ -46,16 +46,16 @@ def compute_player_value(player, extra_point_value, extra_ppg_by_pos):
 
 def write_player_vals(players_idx):
     timestr = datetime.now().strftime('%Y%m%d-%H_%M_%S_%f')[:-3]
-    filename = 'C:/Users/bobna/OneDrive/Documents/fantasyfootball/output/draft_values_{}.csv'.format(timestr)
+    filename = 'C:/Users/bobna/OneDrive/Documents/fantasyfootball/output/2021/draft_values_{}.csv'.format(timestr)
     with open(filename, 'w', newline='') as csvfile:
         csvwriter = csv.writer(csvfile)
-        header = ['NAME', 'TEAM', 'POS', 'PPG', 'EXTRA_PPG', 'VALUE', 'POS_REL_VALUE']
+        header = ['NAME', 'TEAM', 'POS', 'POINTS', 'EXTRA_PPG', 'VALUE', 'POS_REL_VALUE']
         csvwriter.writerow(header)
         for player in players_idx.values():
             name = player['NAME']
             team = player['TEAM']
             pos = player['POS']
-            ppg = player['PPG']
+            ppg = player['POINTS']
             extra_ppg = player['EXTRA_PPG']
             value = player['VALUE']
             pos_rel_value = player['POS_REL_VALUE']
@@ -82,7 +82,7 @@ def gather_extra_points(players_idx, baselines):
         player = players_idx[idx]
         extra_ppg_col = 'EXTRA_PPG'
         position = player['POS']
-        ppg = player['PPG']
+        ppg = player['POINTS']
         extra_ppg = ppg - baselines[position]
         if extra_ppg > 0:
             player[extra_ppg_col] = extra_ppg
@@ -105,7 +105,7 @@ def gather_baselines(players_idx):
     for idx in players_idx:
         player = players_idx[idx]
         position = player['POS']
-        points = player['PPG']
+        points = player['POINTS']
         if position in pos_player_counts:
             pos_player_counts[position] += 1
         else:
@@ -114,13 +114,13 @@ def gather_baselines(players_idx):
         count = pos_player_counts[position]
         is_baseline = False
 
-        if position == 'QB' and count == 20:
+        if position == 'QB' and count == 25:
             is_baseline = True
         elif position == 'RB' and count == 30:
             is_baseline = True
         elif position == 'WR' and count == 30:
             is_baseline = True
-        elif position == 'TE' and count == 10:
+        elif position == 'TE' and count == 15:
             is_baseline = True
         elif position == 'K' and count == 10:
             is_baseline = True
@@ -180,8 +180,8 @@ def main(file_path):
     extra_point_val = get_extra_point_val(total_dollars, total_extra_ppg)
     update_all_player_vals(players_idx, extra_point_val, extra_ppg_by_pos)
 
-    keepers_file = 'C:/Users/bobna/OneDrive/Documents/fantasyfootball/input/ff_2020_keepers.csv'
-    draft_picks_file = 'C:/Users/bobna/OneDrive/Documents/fantasyfootball/output/draft_picks.csv'
+    keepers_file = 'C:/Users/bobna/OneDrive/Documents/fantasyfootball/input/2021/ff_2021_keepers.csv'
+    draft_picks_file = 'C:/Users/bobna/OneDrive/Documents/fantasyfootball/output/2021/draft_picks.csv'
 
     (players_idx, total_dollars, total_extra_ppg, extra_point_val) = replay_picks(keepers_file, players_idx, baselines, total_dollars, total_extra_ppg)
     (players_idx, total_dollars, total_extra_ppg, extra_point_val) = replay_picks(draft_picks_file, players_idx, baselines, total_dollars, total_extra_ppg)
@@ -215,4 +215,4 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         main(sys.argv[1])
     else:
-        main('C:/Users/bobna/OneDrive/Documents/fantasyfootball/input/ff_2020_players.xlsx')
+        main('C:/Users/bobna/OneDrive/Documents/fantasyfootball/input/2021/ff_2021_players.xlsx')
