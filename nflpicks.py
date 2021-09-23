@@ -22,8 +22,8 @@ url_template = 'https://www.pro-football-reference.com/years/yyyy/'
 #    year_soup = BeautifulSoup(year_req.content, 'html.parser')
 #    print(year_soup.prettify())
 
-file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
-games_template = file_dir + 'yyyy_weekly_schedule.html'
+file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
+games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
@@ -116,27 +116,18 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_future(program_start_time, game_year, game_date, game_time):
-    game_time_split = game_time.split(':')
-    game_hours = int(game_time_split[0])
-    game_minutes = int(game_time_split[1][:2])
-    game_am_pm = game_time_split[1][2:]
+def is_game_in_future(game_date):
+    game_date_split = game_date.split('-')
+    game_year = int(game_date_split[0])
+    game_month = int(game_date_split[1])
+    game_day = int(game_date_split[2])
 
-    if game_am_pm == 'PM' and game_hours != 12:
-        game_hours += 12
-    elif game_am_pm == 'AM' and game_hours == 12:
-        game_hours = 0
+    game_datetime = datetime(year=game_year, month=game_month, day=game_day)
 
-    game_date_split = game_date.split()
-    game_month = game_date_split[0]
-    game_month_number = months[game_month]
-    game_day_number = int(game_date_split[1])
-
-    game_datetime = datetime(year=game_year, month=game_month_number, day=game_day_number, hour=game_hours, minute=game_minutes)
-
-    return game_datetime > program_start_time
+    return game_datetime.date() >= datetime.today().date()
 
 #ideas - get rid of week 17...and include playoffs
+#TODO: change from using the season averages to compiling weighted averages from each game stats
 def get_model_inputs(full_games_soup, single_year_stats, year):
     game_counter = 0
     games_table = full_games_soup.find_all('table', id='games')[0]
@@ -164,7 +155,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(start_time, year, single_game['game_date'], single_game['gametime']):
+        if is_game_in_future(single_game['game_date']):
             return inputs, outputs, stat_names_used
 
         winner = single_game['winner']
@@ -195,7 +186,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2020'))
+    future_games_file = open(games_template.replace('yyyy', '2021'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
     games_table = future_games_soup.find_all('table', id='games')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
@@ -220,18 +211,11 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
                 game_column_name = game_stat_column['data-stat']
                 game_to_predict[game_column_name] = game_stat_column.text
 
-            team1 = game_to_predict['visitor_team']
-            team2 = game_to_predict['home_team']
-            if team1 == 'Las Vegas Raiders':
-                team1 = 'Oakland Raiders'
-            elif team2 == 'Las Vegas Raiders':
-                team2 = 'Oakland Raiders'
-            if team1 == 'Washington Football Team':
-                team1 = 'Washington Redskins'
-            elif team2 == 'Washington Football Team':
-                team2 = 'Washington Redskins'
-            team1_year_stats = year_stats[2019][team1]
-            team2_year_stats = year_stats[2019][team2]
+            team1 = game_to_predict['winner']
+            team2 = game_to_predict['loser']
+
+            team1_year_stats = year_stats[2021][team1]
+            team2_year_stats = year_stats[2021][team2]
 
             populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
             populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
@@ -245,7 +229,7 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print(str(game_to_predict['boxscore_word']) + ' ' + game_to_predict['gametime'] + '|' + team1 + '|' + str(round(team1_pred[0],2)) + '|' + team2 + '|' + str(round(team2_pred[0],2)))
+            print(str(game_to_predict['game_date']) + ' ' + game_to_predict['gametime'] + '|' + team1 + '|' + str(round(team1_pred[0])) + '|' + team2 + '|' + str(round(team2_pred[0])))
 
 
 year_stats = dict()
@@ -253,7 +237,7 @@ x_input = []
 y_input = []
 stat_names_used = dict()
 
-for year in range(2009, 2020):
+for year in range(2016, 2022):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
@@ -299,7 +283,11 @@ print('coefficient of determination:', r_sq)
 print('intercept:', model.intercept_)
 print('slope:', model.coef_)
 
-predict_weekly_scores(model, '1')
+#for week in range(1, 18):
+    #print('Week: ' + str(week))
+    #predict_weekly_scores(model, str(week))
+
+predict_weekly_scores(model, '3')
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
