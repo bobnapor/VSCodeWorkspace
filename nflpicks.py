@@ -22,7 +22,7 @@ url_template = 'https://www.pro-football-reference.com/years/yyyy/'
 #    year_soup = BeautifulSoup(year_req.content, 'html.parser')
 #    print(year_soup.prettify())
 
-file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
+file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
 games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
@@ -116,7 +116,7 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_future(game_date):
+def is_game_in_future(game_date, this_game_week_num, curr_run_week_num):
     game_date_split = game_date.split('-')
     game_year = int(game_date_split[0])
     game_month = int(game_date_split[1])
@@ -124,11 +124,14 @@ def is_game_in_future(game_date):
 
     game_datetime = datetime(year=game_year, month=game_month, day=game_day)
 
-    return game_datetime.date() >= datetime.today().date()
+    return game_datetime.date() >= datetime.today().date() or this_game_week_num >= curr_run_week_num
+
+def is_game_week_complete(this_game_week_num, curr_run_week_num):
+    return 
 
 #ideas - get rid of week 17...and include playoffs
 #TODO: change from using the season averages to compiling weighted averages from each game stats
-def get_model_inputs(full_games_soup, single_year_stats, year):
+def get_model_inputs(full_games_soup, single_year_stats, year, curr_run_week_num):
     game_counter = 0
     games_table = full_games_soup.find_all('table', id='games')[0]
     inputs = []
@@ -143,7 +146,8 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         loser_off_inputs = []
         loser_def_inputs = []
         single_game = dict()
-
+        
+        this_game_week_num = game_row.find_all('th')[0].text
         game_stat_columns = game_row.find_all('td')
 
         if len(game_stat_columns) < 1:
@@ -155,9 +159,9 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(single_game['game_date']):
+        if is_game_in_future(single_game['game_date'], this_game_week_num, curr_run_week_num):
             return inputs, outputs, stat_names_used
-
+        
         winner = single_game['winner']
         winner_stats = single_year_stats[winner]
         stat_names_used_tmp = populate_inputs(winner_stats, winner_off_inputs, winner_def_inputs)
@@ -186,7 +190,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2021'))
+    future_games_file = open(games_template.replace('yyyy', '2022'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
     games_table = future_games_soup.find_all('table', id='games')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
@@ -214,8 +218,8 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
             team1 = game_to_predict['winner']
             team2 = game_to_predict['loser']
 
-            team1_year_stats = year_stats[2021][team1]
-            team2_year_stats = year_stats[2021][team2]
+            team1_year_stats = year_stats[2022][team1]
+            team2_year_stats = year_stats[2022][team2]
 
             populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
             populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
@@ -229,15 +233,16 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
 
             team1_pred = linear_regression_model.predict(team1_inputs)
             team2_pred = linear_regression_model.predict(team2_inputs)
-            print(str(game_to_predict['game_date']) + ' ' + game_to_predict['gametime'] + '|' + team1 + '|' + str(round(team1_pred[0])) + '|' + team2 + '|' + str(round(team2_pred[0])))
+            print(week_num + '|' + str(game_to_predict['game_date']) + ' ' + game_to_predict['gametime'] + '|' + team1 + '|' + str(round(team1_pred[0])) + '|' + team2 + '|' + str(round(team2_pred[0])))
 
 
 year_stats = dict()
 x_input = []
 y_input = []
 stat_names_used = dict()
+curr_run_week_num = '5'
 
-for year in range(2016, 2022):
+for year in range(2019, 2023):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
@@ -262,7 +267,7 @@ for year in range(2016, 2022):
 
     games_file = open(games_template.replace('yyyy', str(year)))
     games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
+    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year, curr_run_week_num)
 
     for input_stat in inputs:
         x_input.append(input_stat)
@@ -287,7 +292,7 @@ print('slope:', model.coef_)
     #print('Week: ' + str(week))
     #predict_weekly_scores(model, str(week))
 
-predict_weekly_scores(model, '3')
+predict_weekly_scores(model, curr_run_week_num)
 
 for num_stat in range(0, len(x_input[0])):
     x_plot = []
