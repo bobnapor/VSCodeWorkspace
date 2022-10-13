@@ -21,7 +21,10 @@ variable_school_names = {
     'Southern California':'USC',
     'Louisiana State':'LSU',
     'Pittsburgh':'Pitt',
-    'Mississippi':'Ole Miss'
+    'Mississippi':'Ole Miss',
+    'Texas-El Paso':'UTEP',
+    'Texas-San Antonio':'UTSA',
+    'Nevada-Las Vegas':'UNLV'
 }
 
 start_time = datetime.now()
