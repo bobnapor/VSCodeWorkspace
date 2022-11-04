@@ -1,9 +1,14 @@
+from contextlib import AbstractAsyncContextManager
 import csv
+from re import A
 
 filenames = []
-filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 1- Website Items.csv')
+filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 1 - Website Items.csv')
 filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 2 - New Pricing.csv')
-filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 3- ORS Pricing.csv')
+filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 3 - ORS Pricing.csv')
+
+updates_output_file = 'C:/Users/bobna/OneDrive/Desktop/Price Upload Project/updates.csv'
+no_updates_output_file = 'C:/Users/bobna/OneDrive/Desktop/Price Upload Project/no_updates.csv'
 
 #TODO: 1. loop through spreadsheet 1 and collect sku's
 #TODO: 2. if sku from sheet 1 exists in sheet 2, collect 'MONTGOMERY' price from sheet 2 and mark up 20% (make variable later) -> take min of marked up and column 'MAPP PRICE'
@@ -58,8 +63,40 @@ with open(filenames[0], 'r', encoding="utf-8-sig") as csvfile:
         sku = str(row[file_1_fields.get('SKU')])
         price = float(row[file_1_fields.get('Price')])
         sku_sheet2_price_str = file_2_sku_price_map.get(sku)
-        if sku_sheet2_price_str is not None:
-            print('Price of sku ' + sku + ' is diff in sheet2 = ' + str((float(sku_sheet2_price_str) == price)))
         sku_sheet3_price_str = file_3_sku_price_map.get(sku)
+
+        sku_sheet2_price = price
+        sku_sheet3_price = price
+
+        #TODO need to handle when sku not present in sheet 2 or sheet 3, setting above to price might be hiding some records
+
+        if sku_sheet2_price_str is not None:
+            sku_sheet2_price = float(sku_sheet2_price_str)
+
         if sku_sheet3_price_str is not None:
-            print('Price of sku ' + sku + ' is diff in sheet3 = ' + str((float(sku_sheet3_price_str) == price)))
+            sku_sheet3_price = float(sku_sheet3_price_str)
+
+        if sku_sheet2_price == sku_sheet3_price:
+            if sku_sheet3_price == price:
+                with open(no_updates_output_file, 'a', newline='') as csvfile:
+                    csvwriter = csv.writer(csvfile)
+                    no_update_line_to_write = [row[0], row[1], row[2], row[3], row[4], row[5], 'new price equals original']
+                    csvwriter.writerow(no_update_line_to_write)
+            else:
+                with open(updates_output_file, 'a', newline='') as csvfile:
+                    csvwriter = csv.writer(csvfile)
+                    update_line_to_write = [row[0], row[1], row[2], row[3], row[4], sku_sheet3_price]
+                    csvwriter.writerow(update_line_to_write)
+        else:
+            if sku_sheet2_price != price and sku_sheet3_price != price:
+                print('do something')
+            elif sku_sheet2_price == price and sku_sheet3_price != price:
+                with open(updates_output_file, 'a', newline='') as csvfile:
+                    csvwriter = csv.writer(csvfile)
+                    update_line_to_write = [row[0], row[1], row[2], row[3], row[4], sku_sheet3_price]
+                    csvwriter.writerow(update_line_to_write)
+            elif sku_sheet2_price != price and sku_sheet3_price == price:
+                with open(updates_output_file, 'a', newline='') as csvfile:
+                    csvwriter = csv.writer(csvfile)
+                    update_line_to_write = [row[0], row[1], row[2], row[3], row[4], sku_sheet2_price]
+                    csvwriter.writerow(update_line_to_write)
