@@ -94,35 +94,35 @@ def main(website_items_sheet, sheet2, sheet3, output_dir=os.path.expanduser("~/O
             sku_sheet2_price = original_price
             sku_sheet3_price = original_price
 
-            #TODO need to handle when sku not present in sheet 2 or sheet 3, setting above to price might be hiding some records
-            #TODO make runnable for macOs
-
-            if sku_sheet2_price_str is not None:
-                sku_sheet2_price = float(sku_sheet2_price_str)
-
-            if sku_sheet3_price_str is not None:
-                sku_sheet3_price = float(sku_sheet3_price_str)
-
-            if sku_sheet2_price == sku_sheet3_price:
-                if sku_sheet3_price == original_price:
-                    write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price equals original')
-                elif sku_sheet3_price == 0:
-                    write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
-                else:
-                    write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet3_price, '')
+            if sku_sheet3_price_str is None and sku_sheet2_price_str is None:
+                write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'sku not found in sheet2 or sheet3')
             else:
-                if sku_sheet2_price != original_price and sku_sheet3_price != original_price:
-                    write_to_file(conflicting_updates_file, sku, title, brand, part_number1, part_number2, sku_sheet2_price, sku_sheet3_price)
-                elif sku_sheet2_price == original_price and sku_sheet3_price != original_price:
-                    if sku_sheet3_price == 0:
+                if sku_sheet2_price_str is not None:
+                    sku_sheet2_price = float(sku_sheet2_price_str)
+
+                if sku_sheet3_price_str is not None:
+                    sku_sheet3_price = float(sku_sheet3_price_str)
+
+                if sku_sheet2_price == sku_sheet3_price:
+                    if sku_sheet3_price == original_price:
+                        write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price equals original')
+                    elif sku_sheet3_price == 0:
                         write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
                     else:
                         write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet3_price, '')
-                elif sku_sheet2_price != original_price and sku_sheet3_price == original_price:
-                    if sku_sheet2_price == 0:
-                        write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
-                    else:
-                        write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet2_price, '')
+                else:
+                    if sku_sheet2_price != original_price and sku_sheet3_price != original_price:
+                        write_to_file(conflicting_updates_file, sku, title, brand, part_number1, part_number2, sku_sheet2_price, sku_sheet3_price)
+                    elif sku_sheet2_price == original_price and sku_sheet3_price != original_price:
+                        if sku_sheet3_price == 0:
+                            write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
+                        else:
+                            write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet3_price, '')
+                    elif sku_sheet2_price != original_price and sku_sheet3_price == original_price:
+                        if sku_sheet2_price == 0:
+                            write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
+                        else:
+                            write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet2_price, '')
 
 
 if __name__ == '__main__':
