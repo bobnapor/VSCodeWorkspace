@@ -1,102 +1,137 @@
-from contextlib import AbstractAsyncContextManager
 import csv
-from re import A
+import os.path
+import sys
+from datetime import datetime
 
-filenames = []
-filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 1 - Website Items.csv')
-filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 2 - New Pricing.csv')
-filenames.append('C:/Users/bobna/OneDrive/Desktop/Price Upload Project/Spreadsheet 3 - ORS Pricing.csv')
 
-updates_output_file = 'C:/Users/bobna/OneDrive/Desktop/Price Upload Project/updates.csv'
-no_updates_output_file = 'C:/Users/bobna/OneDrive/Desktop/Price Upload Project/no_updates.csv'
+def delete_file_if_exists(file_to_delete):
+    if os.path.exists(file_to_delete):
+        os.remove(file_to_delete)
 
-#TODO: 1. loop through spreadsheet 1 and collect sku's
-#TODO: 2. if sku from sheet 1 exists in sheet 2, collect 'MONTGOMERY' price from sheet 2 and mark up 20% (make variable later) -> take min of marked up and column 'MAPP PRICE'
-#TODO: 3. if sku from sheet 1 exists in sheet 3, mark column 'Std Pkg Cust Cost' up 20% and take that
-#TODO: see notes doc
 
-file_2_sku_price_map = dict()
-file_2_fields = dict()
-with open(filenames[1], 'r', encoding="utf-8-sig") as csvfile:
-    csvreader = csv.reader(csvfile)
-    field_num = 0
-
-    for field in next(csvreader):
-        file_2_fields[field] = field_num
-        field_num += 1
-
-    file_2_sku_price_map = dict()
-    for row in csvreader:
-        marked_up_montgomery_price = float(row[file_2_fields.get('MONTGOMERY')]) * 1.2
-        mapp_price_str = row[file_2_fields.get('MAPP PRICE')]
-        mapp_price = 0.0
-        if(mapp_price_str != ''):
-            mapp_price = float(mapp_price_str)
-        sheet2_price = min(marked_up_montgomery_price, mapp_price)
-        file_2_sku_price_map[str(row[file_2_fields.get('SKU')])] = sheet2_price
-
-file_3_sku_price_map = dict()
-file_3_fields = dict()
-with open(filenames[2], 'r', encoding="utf-8-sig") as csvfile:
-    csvreader = csv.reader(csvfile)
-    field_num = 0
-
-    for field in next(csvreader):
-        file_3_fields[field] = field_num
-        field_num += 1
-
-    file_3_sku_price_map = dict()
-    for row in csvreader:
-        marked_up_std_pkg_cust_cost = float(row[file_3_fields.get('Std Pkg Cust Cost')]) * 1.2
-        file_3_sku_price_map[str(row[file_3_fields.get('Part Number')])] = marked_up_std_pkg_cust_cost
-
-file_1_fields = dict()
-with open(filenames[0], 'r', encoding="utf-8-sig") as csvfile:
-    csvreader = csv.reader(csvfile)
-    field_num = 0
-
-    for field in next(csvreader):
-        file_1_fields[field] = field_num
-        field_num += 1
-
-    for row in csvreader:
-        sku = str(row[file_1_fields.get('SKU')])
-        price = float(row[file_1_fields.get('Price')])
-        sku_sheet2_price_str = file_2_sku_price_map.get(sku)
-        sku_sheet3_price_str = file_3_sku_price_map.get(sku)
-
-        sku_sheet2_price = price
-        sku_sheet3_price = price
-
-        #TODO need to handle when sku not present in sheet 2 or sheet 3, setting above to price might be hiding some records
-
-        if sku_sheet2_price_str is not None:
-            sku_sheet2_price = float(sku_sheet2_price_str)
-
-        if sku_sheet3_price_str is not None:
-            sku_sheet3_price = float(sku_sheet3_price_str)
-
-        if sku_sheet2_price == sku_sheet3_price:
-            if sku_sheet3_price == price:
-                with open(no_updates_output_file, 'a', newline='') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    no_update_line_to_write = [row[0], row[1], row[2], row[3], row[4], row[5], 'new price equals original']
-                    csvwriter.writerow(no_update_line_to_write)
-            else:
-                with open(updates_output_file, 'a', newline='') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    update_line_to_write = [row[0], row[1], row[2], row[3], row[4], sku_sheet3_price]
-                    csvwriter.writerow(update_line_to_write)
+def write_to_file(output_file, sku, title, brand, part_number1, part_number2, price_to_write, note):
+    with open(output_file, 'a', newline='', encoding="utf-8") as output_csvfile:
+        output_csvwriter = csv.writer(output_csvfile)
+        if note is None:
+            line_to_write = [sku, title, brand, part_number1, part_number2, price_to_write]
         else:
-            if sku_sheet2_price != price and sku_sheet3_price != price:
-                print('do something')
-            elif sku_sheet2_price == price and sku_sheet3_price != price:
-                with open(updates_output_file, 'a', newline='') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    update_line_to_write = [row[0], row[1], row[2], row[3], row[4], sku_sheet3_price]
-                    csvwriter.writerow(update_line_to_write)
-            elif sku_sheet2_price != price and sku_sheet3_price == price:
-                with open(updates_output_file, 'a', newline='') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    update_line_to_write = [row[0], row[1], row[2], row[3], row[4], sku_sheet2_price]
-                    csvwriter.writerow(update_line_to_write)
+            line_to_write = [sku, title, brand, part_number1, part_number2, price_to_write, note]
+        output_csvwriter.writerow(line_to_write)
+    output_csvfile.close()
+
+
+def collect_sheet2_prices(price_file2):
+    sku_price_map = dict()
+    fields = dict()
+    with open(price_file2, 'r', encoding="utf-8-sig") as price_file2_csv:
+        csvreader_price_file2 = csv.reader(price_file2_csv)
+        field_num = 0
+
+        for field in next(csvreader_price_file2):
+            fields[field] = field_num
+            field_num += 1
+
+        for row in csvreader_price_file2:
+            marked_up_montgomery_price = float(row[fields.get('MONTGOMERY')]) * 1.2
+            mapp_price_str = row[fields.get('MAPP PRICE')]
+            mapp_price = 0.0
+            if(mapp_price_str != ''):
+                mapp_price = float(mapp_price_str)
+            sheet2_price = min(marked_up_montgomery_price, mapp_price)
+            sku_price_map[str(row[fields.get('SKU')])] = sheet2_price
+    return sku_price_map
+
+
+def collect_sheet3_prices(price_file3):
+    sku_price_map = dict()
+    fields = dict()
+    with open(price_file3, 'r', encoding="unicode_escape") as price_file3_csv:
+        csvreader_price_file3 = csv.reader(price_file3_csv)
+        field_num = 0
+
+        for field in next(csvreader_price_file3):
+            fields[field] = field_num
+            field_num += 1
+
+        for row in csvreader_price_file3:
+            marked_up_std_pkg_cust_cost = float(row[fields.get('Std Pkg Cust Cost')]) * 1.2
+            sku_price_map[str(row[fields.get('Part Number')])] = marked_up_std_pkg_cust_cost
+    return sku_price_map
+
+
+def main(website_items_sheet, sheet2, sheet3, output_dir=os.path.expanduser("~/OneDrive/Desktop/")):
+    timestr = datetime.now().strftime('%Y%m%d-%H_%M_%S')
+    updates_output_file = "{}updates_{}.csv".format(output_dir, timestr)
+    no_updates_output_file = "{}no_updates_{}.csv".format(output_dir, timestr)
+    conflicting_updates_file = "{}conflicting_updates_{}.csv".format(output_dir, timestr)
+
+    delete_file_if_exists(updates_output_file)
+    delete_file_if_exists(no_updates_output_file)
+    delete_file_if_exists(conflicting_updates_file)
+
+    file_2_sku_price_map = collect_sheet2_prices(sheet2)
+    file_3_sku_price_map = collect_sheet3_prices(sheet3)
+
+    with open(website_items_sheet, 'r', encoding="utf-8-sig") as csvfile:
+        file_1_fields = dict()
+        csvreader = csv.reader(csvfile)
+        field_num = 0
+
+        for field in next(csvreader):
+            file_1_fields[field] = field_num
+            field_num += 1
+
+        for row in csvreader:
+            sku = str(row[file_1_fields.get('SKU')])
+            original_price = float(row[file_1_fields.get('Price')])
+            title = str(row[file_1_fields.get('Title')])
+            brand = str(row[file_1_fields.get('Product Brand')])
+            part_number1 = str(row[3])
+            part_number2 = str(row[4])
+            sku_sheet2_price_str = file_2_sku_price_map.get(sku)
+            sku_sheet3_price_str = file_3_sku_price_map.get(sku)
+
+            sku_sheet2_price = original_price
+            sku_sheet3_price = original_price
+
+            #TODO need to handle when sku not present in sheet 2 or sheet 3, setting above to price might be hiding some records
+            #TODO make runnable for macOs
+
+            if sku_sheet2_price_str is not None:
+                sku_sheet2_price = float(sku_sheet2_price_str)
+
+            if sku_sheet3_price_str is not None:
+                sku_sheet3_price = float(sku_sheet3_price_str)
+
+            if sku_sheet2_price == sku_sheet3_price:
+                if sku_sheet3_price == original_price:
+                    write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price equals original')
+                elif sku_sheet3_price == 0:
+                    write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
+                else:
+                    write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet3_price, '')
+            else:
+                if sku_sheet2_price != original_price and sku_sheet3_price != original_price:
+                    write_to_file(conflicting_updates_file, sku, title, brand, part_number1, part_number2, sku_sheet2_price, sku_sheet3_price)
+                elif sku_sheet2_price == original_price and sku_sheet3_price != original_price:
+                    if sku_sheet3_price == 0:
+                        write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
+                    else:
+                        write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet3_price, '')
+                elif sku_sheet2_price != original_price and sku_sheet3_price == original_price:
+                    if sku_sheet2_price == 0:
+                        write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'new price is 0')
+                    else:
+                        write_to_file(updates_output_file, sku, title, brand, part_number1, part_number2, sku_sheet2_price, '')
+
+
+if __name__ == '__main__':
+    if(sys.argv[1] == "test"):
+        main('C:/Users/Bobby/OneDrive/Desktop/Price Upload Project/Spreadsheet 1 - Website Items.csv', 'C:/Users/Bobby/OneDrive/Desktop/Price Upload Project/Spreadsheet 2 - New Pricing.csv', 'C:/Users/Bobby/OneDrive/Desktop/Price Upload Project/Spreadsheet 3 - ORS Pricing.csv')
+    else:
+        if len(sys.argv) == 4:
+            main(sys.argv[1], sys.argv[2], sys.argv[3])
+        elif len(sys.argv) == 5:
+            main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+        else:
+            print("Invalid number of input arguments.  Please supply at least the full paths of the 3 product files: Website Items, New Pricing, ORS Pricing")
