@@ -116,7 +116,7 @@ def get_def_stats(full_defense_soup):
     return single_year_defense
 
 
-def is_game_in_future(game_date, this_game_week_num, curr_run_week_num):
+def is_game_in_future(game_date):
     game_date_split = game_date.split('-')
     game_year = int(game_date_split[0])
     game_month = int(game_date_split[1])
@@ -126,12 +126,10 @@ def is_game_in_future(game_date, this_game_week_num, curr_run_week_num):
 
     return game_datetime.date() >= datetime.today().date()
 
-def is_game_week_complete(this_game_week_num, curr_run_week_num):
-    return 
 
 #ideas - get rid of week 17...and include playoffs
 #TODO: change from using the season averages to compiling weighted averages from each game stats
-def get_model_inputs(full_games_soup, single_year_stats, year, curr_run_week_num):
+def get_model_inputs(full_games_soup, single_year_stats, year):
     game_counter = 0
     games_table = full_games_soup.find_all('table', id='games')[0]
     inputs = []
@@ -159,7 +157,7 @@ def get_model_inputs(full_games_soup, single_year_stats, year, curr_run_week_num
             game_column_name = game_stat_column['data-stat']
             single_game[game_column_name] = game_stat_column.text
 
-        if is_game_in_future(single_game['game_date'], this_game_week_num, curr_run_week_num):
+        if is_game_in_future(single_game['game_date']):
             return inputs, outputs, stat_names_used
         
         winner = single_game['winner']
@@ -271,7 +269,7 @@ for year in range(2019, 2023):
 
     games_file = open(games_template.replace('yyyy', str(year)))
     games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year, curr_run_week_num)
+    inputs, outputs, stat_names_used = get_model_inputs(games_soup, single_year_stats, year)
 
     for input_stat in inputs:
         x_input.append(input_stat)
