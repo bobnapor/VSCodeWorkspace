@@ -124,7 +124,7 @@ def is_game_in_future(game_date, this_game_week_num, curr_run_week_num):
 
     game_datetime = datetime(year=game_year, month=game_month, day=game_day)
 
-    return game_datetime.date() >= datetime.today().date() or this_game_week_num >= curr_run_week_num
+    return game_datetime.date() >= datetime.today().date()
 
 def is_game_week_complete(this_game_week_num, curr_run_week_num):
     return 
@@ -186,6 +186,10 @@ def get_model_inputs(full_games_soup, single_year_stats, year, curr_run_week_num
         outputs.append(winner_score)
         inputs.append(loser_inputs)
         outputs.append(loser_score)
+
+        if year == 2022:
+            print(single_game['game_date'] + '|' + winner + '|' + str(winner_score) + '|' + loser + '|' + str(loser_score))
+
     return inputs, outputs, stat_names_used
 
 
@@ -240,7 +244,7 @@ year_stats = dict()
 x_input = []
 y_input = []
 stat_names_used = dict()
-curr_run_week_num = '5'
+curr_run_week_num = '12'
 
 for year in range(2019, 2023):
     single_year_stats = dict()
