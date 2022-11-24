@@ -186,7 +186,10 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         outputs.append(loser_score)
 
         if year == 2022:
-            print(single_game['game_date'] + '|' + winner + '|' + str(winner_score) + '|' + loser + '|' + str(loser_score))
+            if single_game['game_location'] == '@':
+                print(single_game['game_date'] + winner + loser + '|' + single_game['game_date'] + '|' + winner + '|' + str(winner_score) + '|' + loser + '|' + str(loser_score))
+            else:
+                print(single_game['game_date'] + loser + winner + '|' + single_game['game_date'] + '|' + loser + '|' + str(loser_score) + '|' + winner + '|' + str(winner_score))
 
     return inputs, outputs, stat_names_used
 
