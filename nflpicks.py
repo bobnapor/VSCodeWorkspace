@@ -245,7 +245,7 @@ year_stats = dict()
 x_input = []
 y_input = []
 stat_names_used = dict()
-curr_run_week_num = '12'
+curr_run_week_num = '15'
 
 for year in range(2019, 2023):
     single_year_stats = dict()

@@ -111,7 +111,7 @@ def is_game_in_past(run_date, game_date):
 
     return game_datetime < run_date
 
-
+#TODO: change from using the season averages to compiling weighted averages from each game stats
 def get_model_inputs(full_games_soup, single_year_stats, year):
     inputs = []
     outputs = []
@@ -213,8 +213,8 @@ def predict_weekly_scores(linear_regression_model, run_date, predict_end_date):
 
             team1 = game_to_predict['visitor_team_name']
             team2 = game_to_predict['home_team_name']
-            team1_year_stats = year_stats[2019][team1]
-            team2_year_stats = year_stats[2019][team2]
+            team1_year_stats = year_stats[2021][team1]
+            team2_year_stats = year_stats[2021][team2]
 
             populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
             populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
@@ -236,7 +236,7 @@ x_input = []
 y_input = []
 stat_names_used = dict()
 
-for year in range(2019, 2020):
+for year in range(2020, 2021):
     single_year_stats = dict()
 
     next_year = str(year + 1)[2:]
@@ -274,7 +274,7 @@ for year in range(2019, 2020):
 
 input_weights = np.ones(len(x_input))
 input_weights[-100:-10] *= 2
-input_weights[-10:] *= 3
+input_weights[-10:] *= 4
 x, y = np.array(x_input), np.array(y_input)
 model_weighted = LinearRegression().fit(x, y, input_weights)
 model = LinearRegression().fit(x, y)
@@ -300,7 +300,7 @@ print('slope:', model_weighted.coef_)
 
 tomorrow = run_date + timedelta(days=1)
 
-predict_weekly_scores(model, run_date, tomorrow)
+#predict_weekly_scores(model, run_date, tomorrow)
 predict_weekly_scores(model_weighted, run_date, tomorrow)
 
 #start_range = datetime.date(datetime(year=2020, month=2, day=28)) # pick rest of 1/31
