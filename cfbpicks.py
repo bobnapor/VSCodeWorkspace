@@ -217,6 +217,13 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         outputs.append(winner_score)
         inputs.append(loser_inputs)
         outputs.append(loser_score)
+
+        if year == 2022:
+            if single_game['game_location'] == '@':
+                print(single_game['date_game'] + winner + loser + '|' + single_game['date_game'] + '|' + winner + '|' + str(winner_score) + '|' + loser + '|' + str(loser_score))
+            else:
+                print(single_game['date_game'] + loser + winner + '|' + single_game['date_game'] + '|' + loser + '|' + str(loser_score) + '|' + winner + '|' + str(winner_score))
+
     return inputs, outputs, stat_names_used
 
 
@@ -290,7 +297,7 @@ x_input = []
 y_input = []
 stat_names_used = dict()
 
-for year in range(2016, 2023):
+for year in range(2019, 2023):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
