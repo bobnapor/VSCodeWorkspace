@@ -2,8 +2,10 @@
 
 import csv
 import os.path
-import sys
+import decimal
 from datetime import datetime
+
+decimal.getcontext().rounding = decimal.ROUND_DOWN
 
 
 def delete_file_if_exists(file_to_delete):
@@ -37,9 +39,9 @@ def collect_sheet2_prices(price_file2):
             marked_up_montgomery_price = float(row[fields.get('MONTGOMERY')]) * 1.2
             mapp_price_str = row[fields.get('MAPP PRICE')]
             mapp_price = 0.0
-            if(mapp_price_str != ''):
+            if (mapp_price_str != ''):
                 mapp_price = float(mapp_price_str)
-            sheet2_price = min(marked_up_montgomery_price, mapp_price)
+            sheet2_price = max(marked_up_montgomery_price, mapp_price)
             sku_price_map[str(row[fields.get('SKU')])] = sheet2_price
     return sku_price_map
 
@@ -59,6 +61,12 @@ def collect_sheet3_prices(price_file3):
             marked_up_std_pkg_cust_cost = float(row[fields.get('Std Pkg Cust Cost')]) * 1.2
             sku_price_map[str(row[fields.get('Part Number')])] = marked_up_std_pkg_cust_cost
     return sku_price_map
+
+
+def get_price_to_use(vendor_price_str, current_price):
+    rounded_price = round(vendor_price_str, 2)
+    price_difference = current_price - rounded_price
+    return rounded_price if abs(price_difference) > 0.01 + 0.000001 else current_price
 
 
 def main(website_items_sheet, sheet2, sheet3, output_dir=os.path.expanduser("~/OneDrive/Desktop/")):
@@ -100,10 +108,10 @@ def main(website_items_sheet, sheet2, sheet3, output_dir=os.path.expanduser("~/O
                 write_to_file(no_updates_output_file, sku, title, brand, part_number1, part_number2, original_price, 'sku not found in sheet2 or sheet3')
             else:
                 if sku_sheet2_price_str is not None:
-                    sku_sheet2_price = float(sku_sheet2_price_str)
+                    sku_sheet2_price = get_price_to_use(sku_sheet2_price_str, original_price)
 
                 if sku_sheet3_price_str is not None:
-                    sku_sheet3_price = float(sku_sheet3_price_str)
+                    sku_sheet3_price = get_price_to_use(sku_sheet3_price_str, original_price)
 
                 if sku_sheet2_price == sku_sheet3_price:
                     if sku_sheet3_price == original_price:
