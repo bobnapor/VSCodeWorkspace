@@ -185,17 +185,18 @@ def get_model_inputs(full_games_soup, single_year_stats, year):
         inputs.append(loser_inputs)
         outputs.append(loser_score)
 
-        if year == 2022:
+        if year == 2023:
+            gamedatetime = single_game['game_date'] + ' ' + single_game['gametime']
             if single_game['game_location'] == '@':
-                print(single_game['game_date'] + winner + loser + '|' + single_game['game_date'] + '|' + winner + '|' + str(winner_score) + '|' + loser + '|' + str(loser_score))
+                print(gamedatetime + winner + loser + '|' + single_game['game_date'] + '|' + winner + '|' + str(winner_score) + '|' + loser + '|' + str(loser_score))
             else:
-                print(single_game['game_date'] + loser + winner + '|' + single_game['game_date'] + '|' + loser + '|' + str(loser_score) + '|' + winner + '|' + str(winner_score))
+                print(gamedatetime + loser + winner + '|' + single_game['game_date'] + '|' + loser + '|' + str(loser_score) + '|' + winner + '|' + str(winner_score))
 
     return inputs, outputs, stat_names_used
 
 
 def predict_weekly_scores(linear_regression_model, week_num_target):
-    future_games_file = open(games_template.replace('yyyy', '2022'))
+    future_games_file = open(games_template.replace('yyyy', '2023'))
     future_games_soup = BeautifulSoup(future_games_file.read(), 'html.parser')
     games_table = future_games_soup.find_all('table', id='games')[0]
     for game_row in games_table.find_all('tbody')[0].find_all('tr'):
@@ -223,8 +224,8 @@ def predict_weekly_scores(linear_regression_model, week_num_target):
             team1 = game_to_predict['winner']
             team2 = game_to_predict['loser']
 
-            team1_year_stats = year_stats[2022][team1]
-            team2_year_stats = year_stats[2022][team2]
+            team1_year_stats = year_stats[2023][team1]
+            team2_year_stats = year_stats[2023][team2]
 
             populate_inputs(team1_year_stats, team1_off_inputs, team1_def_inputs)
             populate_inputs(team2_year_stats, team2_off_inputs, team2_def_inputs)
@@ -245,9 +246,9 @@ year_stats = dict()
 x_input = []
 y_input = []
 stat_names_used = dict()
-curr_run_week_num = '15'
+curr_run_week_num = '4'
 
-for year in range(2019, 2023):
+for year in range(2018, 2024):
     single_year_stats = dict()
 
     offense_file = open(off_template.replace('yyyy', str(year)))
