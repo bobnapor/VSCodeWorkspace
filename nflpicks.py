@@ -22,7 +22,7 @@ url_template = 'https://www.pro-football-reference.com/years/yyyy/'
 #    year_soup = BeautifulSoup(year_req.content, 'html.parser')
 #    print(year_soup.prettify())
 
-file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
+file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
 games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
@@ -100,6 +100,44 @@ def get_off_stats(full_offense_soup):
                 single_year_offense[team] = single_team_offense
                 print('Extracted offensive data for the ' + str(year) + ' ' + team)
     return single_year_offense
+
+
+def get_off_stats_new(full_offense_soup):
+    single_year_offense = []
+    for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
+        offense_soup = BeautifulSoup(comment, 'html.parser')
+        offense_table = offense_soup.find('table', id='team_stats')
+        if offense_table:
+            offense_rows = offense_table.find('tbody').find_all('tr')
+            for offense_row in offense_rows:
+                single_team_offense = {col['data-stat']: col.text for col in offense_row.find_all('td')}
+                team = single_team_offense.get('team')
+                if team:
+                    single_year_offense.append(single_team_offense)
+                    print(f'Extracted offensive data for the {team}')
+
+    # Convert the list of dictionaries to a DataFrame
+    df = pd.DataFrame(single_year_offense)
+    return df
+
+
+def get_def_stats_new(full_defense_soup):
+    single_year_defense = []
+    for comment in full_defense_soup.find_all(string=lambda text: isinstance(text, Comment)):
+        defense_soup = BeautifulSoup(comment, 'html.parser')
+        defense_table = defense_soup.find('table', id='team_stats')
+        if defense_table:
+            defense_rows = defense_table.find('tbody').find_all('tr')
+            for defense_row in defense_rows:
+                single_team_defense = {col['data-stat']: col.text for col in defense_row.find_all('td')}
+                team = single_team_defense.get('def_team')
+                if team:
+                    single_year_defense.append(single_team_defense)
+                    print(f'Extracted defensive data for the {team}')
+
+    # Convert the list of dictionaries to a DataFrame
+    df = pd.DataFrame(single_year_defense)
+    return df
 
 
 def get_def_stats(full_defense_soup):
@@ -253,11 +291,11 @@ for year in range(2018, 2024):
 
     offense_file = open(off_template.replace('yyyy', str(year)))
     offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
-    single_year_offense = get_off_stats(offense_soup)
+    single_year_offense = get_off_stats_new(offense_soup)
 
     defense_file = open(def_template.replace('yyyy', str(year)))
     defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
-    single_year_defense = get_def_stats(defense_soup)
+    single_year_defense = get_def_stats_new(defense_soup)
 
     for team in single_year_offense:
         single_team_stats = dict()
