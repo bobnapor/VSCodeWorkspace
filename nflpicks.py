@@ -123,18 +123,16 @@ def get_off_stats_new(full_offense_soup):
 
 def get_def_stats_new(full_defense_soup):
     single_year_defense = []
-    for comment in full_defense_soup.find_all(string=lambda text: isinstance(text, Comment)):
-        defense_soup = BeautifulSoup(comment, 'html.parser')
-        defense_table = defense_soup.find('table', id='team_stats')
-        if defense_table:
-            defense_rows = defense_table.find('tbody').find_all('tr')
-            for defense_row in defense_rows:
-                single_team_defense = {col['data-stat']: col.text for col in defense_row.find_all('td')}
-                team = single_team_defense.get('def_team')
-                if team:
-                    single_year_defense.append(single_team_defense)
-                    print(f'Extracted defensive data for the {team}')
-
+    defense_table = full_defense_soup.find('table', id='team_stats')
+    if not defense_table:
+        return pd.DataFrame()  # Return an empty DataFrame if the table is not found
+    defense_rows = defense_table.find('tbody').find_all('tr')
+    for defense_row in defense_rows:
+        single_team_defense = {f'def_{col["data-stat"]}': col.text for col in defense_row.find_all('td')}
+        team = single_team_defense.get('def_team')
+        if team:
+            single_year_defense.append(single_team_defense)
+            print(f'Extracted defense data for the {team}')
     # Convert the list of dictionaries to a DataFrame
     df = pd.DataFrame(single_year_defense)
     return df
