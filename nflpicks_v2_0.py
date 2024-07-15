@@ -1,7 +1,65 @@
 import pandas as pd
 import numpy as np
+from bs4 import BeautifulSoup
+from bs4 import Comment
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
+
+
+file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
+games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
+def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
+off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
+
+
+stat_columns_to_use = {
+    'team',
+    'pass_yds',
+    'rush_yds',
+    'turnovers'
+}
+
+
+def get_offense_stats(full_offense_soup, year_str):
+    single_year_offense = []
+    for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
+        offense_soup = BeautifulSoup(comment, 'html.parser')
+        offense_table = offense_soup.find('table', id='team_stats')
+        if offense_table:
+            offense_rows = offense_table.find('tbody').find_all('tr')
+            for offense_row in offense_rows:
+                single_team_offense = {col['data-stat']: col.text for col in offense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
+                team = single_team_offense.get('team')
+                if team:
+                    single_year_offense.append(single_team_offense)
+                    print(f'Extracted offensive data for the {year_str} {team}')
+    # Convert the list of dictionaries to a DataFrame
+    df = pd.DataFrame(single_year_offense)
+    return df
+
+
+def get_defense_stats(full_defense_soup, year_str):
+    single_year_defense = []
+    defense_table = full_defense_soup.find('table', id='team_stats')
+    if not defense_table:
+        return pd.DataFrame()  # Return an empty DataFrame if the table is not found
+    defense_rows = defense_table.find('tbody').find_all('tr')
+    for defense_row in defense_rows:
+        single_team_defense = {f'def_{col["data-stat"]}': col.text for col in defense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
+        team = single_team_defense.get('def_team')
+        if team:
+            single_year_defense.append(single_team_defense)
+            print(f'Extracted defense data for the {year_str} {team}')
+    # Convert the list of dictionaries to a DataFrame
+    df = pd.DataFrame(single_year_defense)
+    return df
+
+
+def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, year_str):
+    single_year_defense_df.rename(columns={'def_team':'team'}, inplace=True)
+    single_year_combined_stats = pd.merge(single_year_offense_df, single_year_defense_df, on='team')
+    single_year_combined_stats.loc[:, 'year'] = year_str
+    return single_year_combined_stats
 
 
 # Preprocessing function
@@ -15,8 +73,8 @@ def preprocess_data(football_data, games):
 
     # Select relevant columns and drop rows with missing values
     features = [
-        'off_passing_yds_home', 'def_passing_yds_home', 'off_rushing_yds_home', 'def_rushing_yds_home', 'off_turnovers_home', 'def_turnovers_home',
-        'off_passing_yds_away', 'def_passing_yds_away', 'off_rushing_yds_away', 'def_rushing_yds_away', 'off_turnovers_away', 'def_turnovers_away'
+        'pass_yds_home', 'def_pass_yds_home', 'rush_yds_home', 'def_rush_yds_home', 'turnovers_home', 'def_turnovers_home',
+        'pass_yds_away', 'def_pass_yds_away', 'rush_yds_away', 'def_rush_yds_away', 'turnovers_away', 'def_turnovers_away'
     ]
     merged_data = merged_data.dropna(subset=features + ['home_score', 'away_score'])
 
@@ -48,6 +106,36 @@ def predict_game(home_team, away_team, year, football_data, games, model_home, m
 
 
 def main():
+############################################
+############################################
+
+    #work in progress - integration
+
+############################################
+############################################
+    all_years_arr = []
+
+    for year in range(2018, 2023):
+        year_str = str(year)
+
+        offense_file = open(off_template.replace('yyyy', year_str))
+        offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
+        single_year_offense = get_offense_stats(offense_soup, year_str)
+
+        defense_file = open(def_template.replace('yyyy', year_str))
+        defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
+        single_year_defense = get_defense_stats(defense_soup, year_str)
+
+        single_year_combined_stats = get_single_year_team_stats(single_year_offense, single_year_defense, year_str)
+        print(single_year_combined_stats)
+        all_years_arr.append(single_year_combined_stats)
+
+    multi_year_combined_stats = pd.concat(all_years_arr, ignore_index=True)
+    print(multi_year_combined_stats)
+    print('hello')
+############################################
+############################################
+
     # Assuming football_data and games are already loaded into pandas DataFrames
     # Sample data from the previous completion
     # You might need to adjust the paths if reading from CSVs or other sources
