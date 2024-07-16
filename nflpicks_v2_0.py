@@ -95,9 +95,9 @@ def get_games(full_games_soup, year_str):
 def preprocess_data(football_data, games):
     # Merge the football_data with games to get the features for each game
     merged_data = games.merge(
-        football_data, how='left', left_on=['date', 'home_team'], right_on=['year', 'team']
+        football_data, how='left', left_on=['year', 'home_team'], right_on=['year', 'team']
     ).merge(
-        football_data, how='left', left_on=['date', 'away_team'], right_on=['year', 'team'], suffixes=('_home', '_away')
+        football_data, how='left', left_on=['year', 'away_team'], right_on=['year', 'team'], suffixes=('_home', '_away')
     )
 
     # Select relevant columns and drop rows with missing values
@@ -105,33 +105,39 @@ def preprocess_data(football_data, games):
         'pass_yds_home', 'def_pass_yds_home', 'rush_yds_home', 'def_rush_yds_home', 'turnovers_home', 'def_turnovers_home',
         'pass_yds_away', 'def_pass_yds_away', 'rush_yds_away', 'def_rush_yds_away', 'turnovers_away', 'def_turnovers_away'
     ]
-    merged_data = merged_data.dropna(subset=features + ['home_score', 'away_score'])
+    merged_data = merged_data.dropna(subset=features + ['score_difference'])
 
     return merged_data, features
 
 
 # Predict game function
-def predict_game(home_team, away_team, year, football_data, games, model_home, model_away):
-    game_data = games[(games['home_team'] == home_team) & (games['away_team'] == away_team) & (games['date'] == year)]
-    if game_data.empty:
-        return None
+def predict_game(home_team, away_team, year, football_data, model):
+    # Get the team statistics
+    home_stats = football_data[(football_data['team'] == home_team) & (football_data['year'] == year)]
+    away_stats = football_data[(football_data['team'] == away_team) & (football_data['year'] == year)]
 
-    game_features = football_data[(football_data['team'].isin([home_team, away_team])) & (football_data['year'] == year)]
-    if game_features.shape[0] < 2:
-        return None
+    if home_stats.empty or away_stats.empty:
+        raise ValueError("Team statistics for the specified year not found.")
 
-    home_stats = game_features[game_features['team'] == home_team].iloc[0]
-    away_stats = game_features[game_features['team'] == away_team].iloc[0]
+    # Create the input feature vector
+    input_features = pd.DataFrame([{
+        'pass_yds_home': home_stats['pass_yds'].values[0],
+        'def_pass_yds_home': home_stats['def_pass_yds'].values[0],
+        'rush_yds_home': home_stats['rush_yds'].values[0],
+        'def_rush_yds_home': home_stats['def_rush_yds'].values[0],
+        'turnovers_home': home_stats['turnovers'].values[0],
+        'def_turnovers_home': home_stats['def_turnovers'].values[0],
+        'pass_yds_away': away_stats['pass_yds'].values[0],
+        'def_pass_yds_away': away_stats['def_pass_yds'].values[0],
+        'rush_yds_away': away_stats['rush_yds'].values[0],
+        'def_rush_yds_away': away_stats['def_rush_yds'].values[0],
+        'turnovers_away': away_stats['turnovers'].values[0],
+        'def_turnovers_away': away_stats['def_turnovers'].values[0]
+    }])
 
-    input_features = np.array([
-        home_stats['off_passing_yds'], home_stats['def_passing_yds'], home_stats['off_rushing_yds'], home_stats['def_rushing_yds'], home_stats['off_turnovers'], home_stats['def_turnovers'],
-        away_stats['off_passing_yds'], away_stats['def_passing_yds'], away_stats['off_rushing_yds'], away_stats['def_rushing_yds'], away_stats['off_turnovers'], away_stats['def_turnovers']
-    ]).reshape(1, -1)
-
-    pred_home_score = model_home.predict(input_features)[0]
-    pred_away_score = model_away.predict(input_features)[0]
-
-    return pred_home_score, pred_away_score
+    # Predict the score difference
+    predicted_score_difference = model.predict(input_features)[0]
+    return predicted_score_difference
 
 
 def main():
@@ -186,32 +192,25 @@ def main():
 
     # Split the data into train and test sets
     X = merged_data[features]
-    y_home = merged_data['home_score']
-    y_away = merged_data['away_score']
+    y = merged_data['score_difference']
 
-    X_train, X_test, y_train_home, y_test_home, y_train_away, y_test_away = train_test_split(X, y_home, y_away, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Train the linear regression models
-    model_home = LinearRegression()
-    model_away = LinearRegression()
+    # Train the linear regression model
+    model = LinearRegression()
+    model.fit(X_train, y_train)
 
-    model_home.fit(X_train, y_train_home)
-    model_away.fit(X_train, y_train_away)
+    # Predict the score differences
+    y_pred = model.predict(X_test)
 
-    # Predict the scores
-    y_pred_home = model_home.predict(X_test)
-    y_pred_away = model_away.predict(X_test)
+    # Evaluate the model
+    score_rmse = np.sqrt(np.mean((y_pred - y_test) ** 2))
 
-    # Evaluate the models
-    home_score_rmse = np.sqrt(np.mean((y_pred_home - y_test_home) ** 2))
-    away_score_rmse = np.sqrt(np.mean((y_pred_away - y_test_away) ** 2))
-
-    print(f"Home Score RMSE: {home_score_rmse}")
-    print(f"Away Score RMSE: {away_score_rmse}")
+    print(f"Score Difference RMSE: {score_rmse}")
 
     # Example prediction
-    predicted_scores = predict_game('Team A', 'Team B', 2023, football_data, games, model_home, model_away)
-    print(f"Predicted Scores for Team A vs Team B in 2023: {predicted_scores}")
+    predicted_score_difference = predict_game('Team A', 'Team B', 2023, multi_year_combined_stats, model)
+    print(f"Predicted Score Difference for Team A vs Team B in 2023: {predicted_score_difference}")
 
 
 if __name__ == "__main__":
