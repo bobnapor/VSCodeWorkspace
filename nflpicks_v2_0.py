@@ -62,6 +62,35 @@ def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, y
     return single_year_combined_stats
 
 
+def get_games(full_games_soup, year_str):
+    games_table = full_games_soup.find('table', id='games')
+    games_list = []
+
+    for game_row in games_table.find('tbody').find_all('tr'):
+        this_game_week_num = game_row.find_all('th')[0].text
+        game_stats = {col['data-stat']: col.text for col in game_row.find_all('td')}
+        if not game_stats or 'game_date' not in game_stats or 'winner' not in game_stats or 'loser' not in game_stats or this_game_week_num == '':
+            continue
+
+        game_date = game_stats['game_date']
+        away_team = game_stats['winner'] if game_stats.get('game_location') == '@' else game_stats['loser']
+        home_team = game_stats['loser'] if away_team == game_stats['winner'] else game_stats['winner']
+
+        winner_score = int(game_stats['pts_win'])
+        loser_score = int(game_stats['pts_lose'])
+        score_difference = winner_score - loser_score if home_team == game_stats['winner'] else loser_score - winner_score
+
+        games_list.append({
+            'game_date': game_date,
+            'away_team': away_team,
+            'home_team': home_team,
+            'score_difference': score_difference,
+            'year': year_str
+        })
+
+    return pd.DataFrame(games_list)
+
+
 # Preprocessing function
 def preprocess_data(football_data, games):
     # Merge the football_data with games to get the features for each game
@@ -113,7 +142,8 @@ def main():
 
 ############################################
 ############################################
-    all_years_arr = []
+    all_years_team_stats_arr = []
+    all_games_history_arr = []
 
     for year in range(2018, 2023):
         year_str = str(year)
@@ -128,11 +158,19 @@ def main():
 
         single_year_combined_stats = get_single_year_team_stats(single_year_offense, single_year_defense, year_str)
         print(single_year_combined_stats)
-        all_years_arr.append(single_year_combined_stats)
+        all_years_team_stats_arr.append(single_year_combined_stats)
 
-    multi_year_combined_stats = pd.concat(all_years_arr, ignore_index=True)
+        games_file = open(games_template.replace('yyyy', year_str))
+        games_soup = BeautifulSoup(games_file.read(), 'html.parser')
+        single_year_games = get_games(games_soup, year_str)
+        print(single_year_games)
+        all_games_history_arr.append(single_year_games)
+
+    multi_year_combined_stats = pd.concat(all_years_team_stats_arr, ignore_index=True)
+    multi_year_games_history = pd.concat(all_games_history_arr, ignore_index=True)
     print(multi_year_combined_stats)
-    print('hello')
+    print(multi_year_games_history)
+
 ############################################
 ############################################
 
@@ -144,7 +182,7 @@ def main():
     # For this example, let's assume football_data and games are loaded as pandas DataFrames
 
     # Prepare the data
-    merged_data, features = preprocess_data(football_data, games)
+    merged_data, features = preprocess_data(multi_year_combined_stats, multi_year_games_history)
 
     # Split the data into train and test sets
     X = merged_data[features]
