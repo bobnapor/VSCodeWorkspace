@@ -19,7 +19,6 @@ stat_columns_to_use = {
     'turnovers'
 }
 
-
 def get_offense_stats(full_offense_soup, year_str):
     single_year_offense = []
     for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
@@ -37,7 +36,6 @@ def get_offense_stats(full_offense_soup, year_str):
     df = pd.DataFrame(single_year_offense)
     return df
 
-
 def get_defense_stats(full_defense_soup, year_str):
     single_year_defense = []
     defense_table = full_defense_soup.find('table', id='team_stats')
@@ -54,13 +52,11 @@ def get_defense_stats(full_defense_soup, year_str):
     df = pd.DataFrame(single_year_defense)
     return df
 
-
 def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, year_str):
     single_year_defense_df.rename(columns={'def_team':'team'}, inplace=True)
     single_year_combined_stats = pd.merge(single_year_offense_df, single_year_defense_df, on='team')
     single_year_combined_stats.loc[:, 'year'] = year_str
     return single_year_combined_stats
-
 
 def get_games(full_games_soup, year_str):
     games_table = full_games_soup.find('table', id='games')
@@ -81,6 +77,7 @@ def get_games(full_games_soup, year_str):
         score_difference = winner_score - loser_score if home_team == game_stats['winner'] else loser_score - winner_score
 
         games_list.append({
+            'week_number': this_game_week_num,
             'game_date': game_date,
             'away_team': away_team,
             'home_team': home_team,
@@ -90,8 +87,6 @@ def get_games(full_games_soup, year_str):
 
     return pd.DataFrame(games_list)
 
-
-# Preprocessing function
 def preprocess_data(football_data, games):
     # Merge the football_data with games to get the features for each game
     merged_data = games.merge(
@@ -109,8 +104,6 @@ def preprocess_data(football_data, games):
 
     return merged_data, features
 
-
-# Predict game function
 def predict_game(home_team, away_team, year, football_data, model):
     # Get the team statistics
     home_stats = football_data[(football_data['team'] == home_team) & (football_data['year'] == year)]
@@ -139,53 +132,35 @@ def predict_game(home_team, away_team, year, football_data, model):
     predicted_score_difference = model.predict(input_features)[0]
     return predicted_score_difference
 
-
 def main():
-############################################
-############################################
-
-    #work in progress - integration
-
-############################################
-############################################
     all_years_team_stats_arr = []
     all_games_history_arr = []
 
-    for year in range(2018, 2023):
+    for year in range(2018, 2024):
         year_str = str(year)
 
-        offense_file = open(off_template.replace('yyyy', year_str))
-        offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
-        single_year_offense = get_offense_stats(offense_soup, year_str)
+        with open(off_template.replace('yyyy', year_str)) as offense_file:
+            offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
+            single_year_offense = get_offense_stats(offense_soup, year_str)
 
-        defense_file = open(def_template.replace('yyyy', year_str))
-        defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
-        single_year_defense = get_defense_stats(defense_soup, year_str)
+        with open(def_template.replace('yyyy', year_str)) as defense_file:
+            defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
+            single_year_defense = get_defense_stats(defense_soup, year_str)
 
         single_year_combined_stats = get_single_year_team_stats(single_year_offense, single_year_defense, year_str)
         print(single_year_combined_stats)
         all_years_team_stats_arr.append(single_year_combined_stats)
 
-        games_file = open(games_template.replace('yyyy', year_str))
-        games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-        single_year_games = get_games(games_soup, year_str)
-        print(single_year_games)
-        all_games_history_arr.append(single_year_games)
+        with open(games_template.replace('yyyy', year_str)) as games_file:
+            games_soup = BeautifulSoup(games_file.read(), 'html.parser')
+            single_year_games = get_games(games_soup, year_str)
+            print(single_year_games)
+            all_games_history_arr.append(single_year_games)
 
     multi_year_combined_stats = pd.concat(all_years_team_stats_arr, ignore_index=True)
     multi_year_games_history = pd.concat(all_games_history_arr, ignore_index=True)
     print(multi_year_combined_stats)
     print(multi_year_games_history)
-
-############################################
-############################################
-
-    # Assuming football_data and games are already loaded into pandas DataFrames
-    # Sample data from the previous completion
-    # You might need to adjust the paths if reading from CSVs or other sources
-
-    # Load or define your data here
-    # For this example, let's assume football_data and games are loaded as pandas DataFrames
 
     # Prepare the data
     merged_data, features = preprocess_data(multi_year_combined_stats, multi_year_games_history)
@@ -205,13 +180,26 @@ def main():
 
     # Evaluate the model
     score_rmse = np.sqrt(np.mean((y_pred - y_test) ** 2))
-
     print(f"Score Difference RMSE: {score_rmse}")
 
-    # Example prediction
-    predicted_score_difference = predict_game('Team A', 'Team B', 2023, multi_year_combined_stats, model)
-    print(f"Predicted Score Difference for Team A vs Team B in 2023: {predicted_score_difference}")
+    # Example prediction for a hardcoded week and year
+    input_week = '10'  # Example week
+    input_year = '2023'  # Example year
 
+    # Get games for the specified week and year
+    input_games = multi_year_games_history[
+        (multi_year_games_history['week_number'] == input_week) &
+        (multi_year_games_history['year'] == input_year)
+    ]
+
+    for index, game in input_games.iterrows():
+        home_team = game['home_team']
+        away_team = game['away_team']
+        try:
+            predicted_score_difference = predict_game(home_team, away_team, input_year, multi_year_combined_stats, model)
+            print(f"Predicted Score Difference for {home_team} vs {away_team} in Week {input_week}, {input_year}: {predicted_score_difference}")
+        except ValueError as e:
+            print(f"Could not predict score difference for {home_team} vs {away_team}: {e}")
 
 if __name__ == "__main__":
     main()
