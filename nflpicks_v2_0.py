@@ -5,12 +5,10 @@ from bs4 import Comment
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 
-
 file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
 games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
-
 
 stat_columns_to_use = {
     'team',
@@ -200,6 +198,7 @@ def main():
             print(f"Predicted Score Difference for {home_team} vs {away_team} in Week {input_week}, {input_year}: {predicted_score_difference}")
         except ValueError as e:
             print(f"Could not predict score difference for {home_team} vs {away_team}: {e}")
+
 
 if __name__ == "__main__":
     main()
