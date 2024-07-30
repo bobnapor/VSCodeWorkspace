@@ -3,6 +3,9 @@ import numpy as np
 from bs4 import BeautifulSoup
 from bs4 import Comment
 from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.utils import resample
@@ -32,8 +35,7 @@ def get_offense_stats(full_offense_soup, year_str):
                 if team:
                     single_year_offense.append(single_team_offense)
                     print(f'Extracted offensive data for the {year_str} {team}')
-    df = pd.DataFrame(single_year_offense)
-    return df
+    return pd.DataFrame(single_year_offense)
 
 def get_defense_stats(full_defense_soup, year_str):
     single_year_defense = []
@@ -47,8 +49,7 @@ def get_defense_stats(full_defense_soup, year_str):
         if team:
             single_year_defense.append(single_team_defense)
             print(f'Extracted defense data for the {year_str} {team}')
-    df = pd.DataFrame(single_year_defense)
-    return df
+    return pd.DataFrame(single_year_defense)
 
 def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, year_str):
     single_year_defense_df.rename(columns={'def_team':'team'}, inplace=True)
@@ -100,7 +101,7 @@ def preprocess_data(football_data, games):
 
     return merged_data, features
 
-def calculate_prediction_intervals(model, X, y, X_test, n_iterations=1000, alpha=0.05):
+def calculate_prediction_intervals(model, X, y, X_test, n_iterations=100, alpha=0.05):
     predictions = []
     for _ in range(n_iterations):
         X_resample, y_resample = resample(X, y)
@@ -173,31 +174,52 @@ def main():
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Train the linear regression model
-    model = LinearRegression()
-    model.fit(X_train, y_train)
+    # Define the models
+    models = {
+        'Linear Regression': LinearRegression(),
+        'Decision Tree': DecisionTreeRegressor(random_state=42),
+        'Random Forest': RandomForestRegressor(n_estimators=50, random_state=42),  # Reduced number of trees for faster fitting
+        'SVR': SVR()
+    }
 
-    # Cross-validation
-    cv_scores = cross_val_score(model, X, y, cv=5)
-    print(f"Cross-validation scores: {cv_scores}")
-    print(f"Mean cross-validation score: {np.mean(cv_scores)}")
+    # Train and evaluate each model
+    results = {}
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        
+        # Cross-validation
+        cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+        print(f"{name} Cross-validation scores: {cv_scores}")
+        print(f"{name} Mean cross-validation score: {np.mean(cv_scores)}")
+        
+        # Predict and evaluate the model
+        y_pred = model.predict(X_test)
+        score_rmse = np.sqrt(np.mean((y_pred - y_test) ** 2))
+        score_mae = mean_absolute_error(y_test, y_pred)
+        score_r2 = r2_score(y_test, y_pred)
+        print(f"{name} Score Difference RMSE: {score_rmse}")
+        print(f"{name} Score Difference MAE: {score_mae}")
+        print(f"{name} Score Difference R^2: {score_r2}")
+        
+        results[name] = {
+            'model': model,
+            'cv_scores': cv_scores,
+            'mean_cv_score': np.mean(cv_scores),
+            'rmse': score_rmse,
+            'mae': score_mae,
+            'r2': score_r2
+        }
 
-    # Prediction intervals
-    lower_bound, upper_bound = calculate_prediction_intervals(model, X_train, y_train, X_test)
-    print(f"Prediction intervals (lower bound): {lower_bound[:5]}")
-    print(f"Prediction intervals (upper bound): {upper_bound[:5]}")
+    best_model_name = min(results, key=lambda k: results[k]['mae'])
+    best_model = results[best_model_name]['model']
+    print(f"Best model based on MAE: {best_model_name}")
 
-    # Predict and evaluate the model
-    y_pred = model.predict(X_test)
-    score_rmse = np.sqrt(np.mean((y_pred - y_test) ** 2))
-    score_mae = mean_absolute_error(y_test, y_pred)
-    score_r2 = r2_score(y_test, y_pred)
-    print(f"Score Difference RMSE: {score_rmse}")
-    print(f"Score Difference MAE: {score_mae}")
-    print(f"Score Difference R^2: {score_r2}")
+    # Calculate prediction intervals for the best model
+    lower_bound, upper_bound = calculate_prediction_intervals(best_model, X_train, y_train, X_test, n_iterations=100)
+    print(f"{best_model_name} Prediction intervals (lower bound): {lower_bound[:5]}")
+    print(f"{best_model_name} Prediction intervals (upper bound): {upper_bound[:5]}")
 
     input_games_by_year_and_week = []
-
     for input_year in range(2018, 2024):
         for input_week in range(1, 19):
             input_games_by_year_and_week.append(multi_year_games_history[
@@ -213,7 +235,7 @@ def main():
         input_year = game['year']
         actual_score_difference = game['score_difference']
         try:
-            predicted_score_difference = round(predict_game(home_team, away_team, input_year, multi_year_combined_stats, model), 1)
+            predicted_score_difference = round(predict_game(home_team, away_team, input_year, multi_year_combined_stats, best_model), 1)
             print(f"{home_team}|{away_team}|{input_week}|{input_year}|{predicted_score_difference}|{actual_score_difference}")
         except ValueError as e:
             print(f"Could not predict score difference for {home_team} vs {away_team} for week {input_week} of {input_year}: {e}")
