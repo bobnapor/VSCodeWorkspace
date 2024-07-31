@@ -9,18 +9,25 @@ from sklearn.svm import SVR
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.utils import resample
+import logging
 
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# File directory setup
 file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
 games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
+# Columns to use for stats
 stat_columns_to_use = {
     'team',
     'pass_yds',
     'rush_yds',
     'turnovers'
 }
+
 
 def get_offense_stats(full_offense_soup, year_str):
     single_year_offense = []
@@ -34,8 +41,9 @@ def get_offense_stats(full_offense_soup, year_str):
                 team = single_team_offense.get('team')
                 if team:
                     single_year_offense.append(single_team_offense)
-                    print(f'Extracted offensive data for the {year_str} {team}')
+                    logging.info(f'Extracted offensive data for the {year_str} {team}')
     return pd.DataFrame(single_year_offense)
+
 
 def get_defense_stats(full_defense_soup, year_str):
     single_year_defense = []
@@ -48,14 +56,16 @@ def get_defense_stats(full_defense_soup, year_str):
         team = single_team_defense.get('def_team')
         if team:
             single_year_defense.append(single_team_defense)
-            print(f'Extracted defense data for the {year_str} {team}')
+            logging.info(f'Extracted defense data for the {year_str} {team}')
     return pd.DataFrame(single_year_defense)
+
 
 def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, year_str):
     single_year_defense_df.rename(columns={'def_team':'team'}, inplace=True)
     single_year_combined_stats = pd.merge(single_year_offense_df, single_year_defense_df, on='team')
     single_year_combined_stats['year'] = year_str
     return single_year_combined_stats
+
 
 def get_games(full_games_soup, year_str):
     games_table = full_games_soup.find('table', id='games')
@@ -86,6 +96,7 @@ def get_games(full_games_soup, year_str):
 
     return pd.DataFrame(games_list)
 
+
 def preprocess_data(football_data, games):
     merged_data = games.merge(
         football_data, how='left', left_on=['year', 'home_team'], right_on=['year', 'team']
@@ -101,18 +112,20 @@ def preprocess_data(football_data, games):
 
     return merged_data, features
 
+
 def calculate_prediction_intervals(model, X, y, X_test, n_iterations=100, alpha=0.05):
     predictions = []
     for _ in range(n_iterations):
         X_resample, y_resample = resample(X, y)
         model.fit(X_resample, y_resample)
         predictions.append(model.predict(X_test))
-    
+
     predictions = np.array(predictions)
     lower_bound = np.percentile(predictions, 100 * alpha / 2, axis=0)
     upper_bound = np.percentile(predictions, 100 * (1 - alpha / 2), axis=0)
-    
+
     return lower_bound, upper_bound
+
 
 def predict_game(home_team, away_team, year, football_data, model):
     home_stats = football_data[(football_data['team'] == home_team) & (football_data['year'] == year)]
@@ -139,28 +152,39 @@ def predict_game(home_team, away_team, year, football_data, model):
     predicted_score_difference = model.predict(input_features)[0]
     return predicted_score_difference
 
+
+def load_data_for_year(year, off_template, def_template, games_template):
+    year_str = str(year)
+
+    with open(off_template.replace('yyyy', year_str)) as offense_file:
+        offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
+        single_year_offense = get_offense_stats(offense_soup, year_str)
+
+    with open(def_template.replace('yyyy', year_str)) as defense_file:
+        defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
+        single_year_defense = get_defense_stats(defense_soup, year_str)
+
+    single_year_combined_stats = get_single_year_team_stats(single_year_offense, single_year_defense, year_str)
+
+    with open(games_template.replace('yyyy', year_str)) as games_file:
+        games_soup = BeautifulSoup(games_file.read(), 'html.parser')
+        single_year_games = get_games(games_soup, year_str)
+
+    return single_year_combined_stats, single_year_games
+
+
 def main():
     all_years_team_stats_arr = []
     all_games_history_arr = []
 
     for year in range(2018, 2024):
-        year_str = str(year)
-
-        with open(off_template.replace('yyyy', year_str)) as offense_file:
-            offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
-            single_year_offense = get_offense_stats(offense_soup, year_str)
-
-        with open(def_template.replace('yyyy', year_str)) as defense_file:
-            defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
-            single_year_defense = get_defense_stats(defense_soup, year_str)
-
-        single_year_combined_stats = get_single_year_team_stats(single_year_offense, single_year_defense, year_str)
-        all_years_team_stats_arr.append(single_year_combined_stats)
-
-        with open(games_template.replace('yyyy', year_str)) as games_file:
-            games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-            single_year_games = get_games(games_soup, year_str)
+        try:
+            single_year_combined_stats, single_year_games = load_data_for_year(year, off_template, def_template, games_template)
+            all_years_team_stats_arr.append(single_year_combined_stats)
             all_games_history_arr.append(single_year_games)
+        except Exception as e:
+            logging.error(f"Failed to process data for year {year}: {e}")
+            continue
 
     multi_year_combined_stats = pd.concat(all_years_team_stats_arr, ignore_index=True)
     multi_year_games_history = pd.concat(all_games_history_arr, ignore_index=True)
@@ -186,21 +210,21 @@ def main():
     results = {}
     for name, model in models.items():
         model.fit(X_train, y_train)
-        
+
         # Cross-validation
         cv_scores = cross_val_score(model, X_train, y_train, cv=5)
-        print(f"{name} Cross-validation scores: {cv_scores}")
-        print(f"{name} Mean cross-validation score: {np.mean(cv_scores)}")
-        
+        logging.info(f"{name} Cross-validation scores: {cv_scores}")
+        logging.info(f"{name} Mean cross-validation score: {np.mean(cv_scores)}")
+
         # Predict and evaluate the model
         y_pred = model.predict(X_test)
         score_rmse = np.sqrt(np.mean((y_pred - y_test) ** 2))
         score_mae = mean_absolute_error(y_test, y_pred)
         score_r2 = r2_score(y_test, y_pred)
-        print(f"{name} Score Difference RMSE: {score_rmse}")
-        print(f"{name} Score Difference MAE: {score_mae}")
-        print(f"{name} Score Difference R^2: {score_r2}")
-        
+        logging.info(f"{name} Score Difference RMSE: {score_rmse}")
+        logging.info(f"{name} Score Difference MAE: {score_mae}")
+        logging.info(f"{name} Score Difference R^2: {score_r2}")
+
         results[name] = {
             'model': model,
             'cv_scores': cv_scores,
@@ -212,12 +236,12 @@ def main():
 
     best_model_name = min(results, key=lambda k: results[k]['mae'])
     best_model = results[best_model_name]['model']
-    print(f"Best model based on MAE: {best_model_name}")
+    logging.info(f"Best model based on MAE: {best_model_name}")
 
     # Calculate prediction intervals for the best model
     lower_bound, upper_bound = calculate_prediction_intervals(best_model, X_train, y_train, X_test, n_iterations=100)
-    print(f"{best_model_name} Prediction intervals (lower bound): {lower_bound[:5]}")
-    print(f"{best_model_name} Prediction intervals (upper bound): {upper_bound[:5]}")
+    logging.info(f"{best_model_name} Prediction intervals (lower bound): {lower_bound[:5]}")
+    logging.info(f"{best_model_name} Prediction intervals (upper bound): {upper_bound[:5]}")
 
     input_games_by_year_and_week = []
     for input_year in range(2018, 2024):
@@ -236,9 +260,10 @@ def main():
         actual_score_difference = game['score_difference']
         try:
             predicted_score_difference = round(predict_game(home_team, away_team, input_year, multi_year_combined_stats, best_model), 1)
-            print(f"{home_team}|{away_team}|{input_week}|{input_year}|{predicted_score_difference}|{actual_score_difference}")
+            logging.info(f"{home_team}|{away_team}|{input_week}|{input_year}|{predicted_score_difference}|{actual_score_difference}")
         except ValueError as e:
-            print(f"Could not predict score difference for {home_team} vs {away_team} for week {input_week} of {input_year}: {e}")
+            logging.error(f"Could not predict score difference for {home_team} vs {away_team} for week {input_week} of {input_year}: {e}")
+
 
 if __name__ == "__main__":
     main()
