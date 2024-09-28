@@ -45,7 +45,7 @@ def get_offense_stats(full_offense_soup, year_str):
         if offense_table:
             offense_rows = offense_table.find('tbody').find_all('tr')
             for offense_row in offense_rows:
-                num_games = int(next((col.text for col in offense_row.findall('td') if col['data-set'] == 'g'), '0'))
+                num_games = int(next((col.text for col in offense_row.find_all('td') if col['data-stat'] == 'g'), '0'))
                 single_team_offense = {col['data-stat']: '0' if col.text.strip() == '' else str(int(col.text)/num_games) if is_numeric_value(col.text) else col.text for col in offense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
                 team = single_team_offense.get('team')
                 if team:
@@ -203,15 +203,15 @@ def main(num_runs):
         all_games_history_arr = []
         all_games_future_arr = []
 
-        for year in range(2018, 2024):
-            try:
+        for year in range(2018, 2025):
+            #try:
                 single_year_combined_stats, single_year_games_past, single_year_games_future = load_data_for_year(year, off_template, def_template, games_template)
                 all_years_team_stats_arr.append(single_year_combined_stats)
                 all_games_history_arr.append(single_year_games_past)
                 all_games_future_arr.append(single_year_games_future)
-            except Exception as e:
-                logging.error(f"Failed to process data for year {year}: {e}")
-                continue
+            #except Exception as e:
+            #    logging.error(f"Failed to process data for year {year}: {e}")
+            #    continue
 
         multi_year_combined_stats = pd.concat(all_years_team_stats_arr, ignore_index=True)
         multi_year_games_history = pd.concat(all_games_history_arr, ignore_index=True)
