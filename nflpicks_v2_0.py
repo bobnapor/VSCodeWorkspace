@@ -15,8 +15,8 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # File directory setup
-file_dir = 'C:/Users/bobna/Downloads/NFL_Stats/'
-games_template = file_dir + 'yyyy NFL Weekly League Schedule _ Pro-Football-Reference.com.html'
+file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
+games_template = file_dir + 'yyyy NFL Regular Season Schedule _ Pro-Football-Reference.com.html'
 def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
@@ -229,9 +229,9 @@ def main(num_runs):
         # Define the models
         models = {
             'Linear Regression': LinearRegression(),
-            'Decision Tree': DecisionTreeRegressor(random_state=42),
-            'Random Forest': RandomForestRegressor(n_estimators=50, random_state=42),  # Reduced number of trees for faster fitting
-            'SVR': SVR()
+            #'Decision Tree': DecisionTreeRegressor(random_state=42),
+            #'Random Forest': RandomForestRegressor(n_estimators=50, random_state=42),  # Reduced number of trees for faster fitting
+            #'SVR': SVR()
         }
 
         # Train and evaluate each model
@@ -273,8 +273,8 @@ def main(num_runs):
 
         predict_start_year_inc = 2024
         predict_end_year_exc = 2025
-        predict_start_week_inc = 4
-        predict_end_week_exc = 5
+        predict_start_week_inc = 15
+        predict_end_week_exc = 16#predict_start_week_inc + 1   #change if want to do more than 1 week
 
         input_games_by_year_and_week = []
         for input_year in range(predict_start_year_inc, predict_end_year_exc):
@@ -283,6 +283,11 @@ def main(num_runs):
                     (multi_year_games_future['week_number'] == str(input_week)) & 
                     (multi_year_games_future['year'] == str(input_year))
                 ])
+                #comment out above and uncomment below to gather actual score differences after the games
+                #input_games_by_year_and_week.append(multi_year_games_history[
+                #    (multi_year_games_history['week_number'] == str(input_week)) & 
+                #    (multi_year_games_history['year'] == str(input_year))
+                #])
 
         input_games = pd.concat(input_games_by_year_and_week, ignore_index=True)
         for index, game in input_games.iterrows():
@@ -294,6 +299,7 @@ def main(num_runs):
             projected_score_difference = 0
             try:
                 projected_score_difference = round(predict_game(home_team, away_team, input_year, multi_year_combined_stats, best_model), 1)
+                #TODO: also compute standard deviation and median to assert range and confidence in projection
                 if index in averaged_predictions:
                     averaged_predictions[index] += projected_score_difference
                 else:
@@ -301,7 +307,11 @@ def main(num_runs):
                 logging.info(f"{index}|{home_team}|{away_team}|{input_week}|{input_year}|{projected_score_difference}|{actual_score_difference}")
             except ValueError as e:
                 logging.error(f"Could not predict score difference for {home_team} vs {away_team} for week {input_week} of {input_year}: {e}")
-        
+
+        for game_index, total_pred in averaged_predictions.items():
+            average_pred = round(total_pred / (iteration+1), 1)
+            logging.info(f"{game_index}|{average_pred}")
+
         logging.info("Projections complete!")
 
     for game_index, total_pred in averaged_predictions.items():
@@ -309,4 +319,5 @@ def main(num_runs):
         logging.info(f"{game_index}|{average_pred}")
 
 if __name__ == "__main__":
-    main(10)
+    main(10000)  #5k took ~10 hours, 10k took ~19 hours
+    
