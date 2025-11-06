@@ -223,7 +223,8 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
     X = merged_data[features]
     y = merged_data['score_difference']
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Remove random_state to get different splits each iteration
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
     # Define the models
     models = {
@@ -293,6 +294,8 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
                 'year': input_year,
                 'actual_score_difference': actual_score_difference
             }
+            # Log each prediction as it's made
+            logging.info(f"Iteration {iteration + 1} - Game {index}: {away_team} @ {home_team} (Week {input_week}, {input_year}) - Predicted: {projected_score_difference}")
         except ValueError as e:
             logging.error(f"Could not predict score difference for {home_team} vs {away_team}: {e}")
     
@@ -302,6 +305,7 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
 
 def main(num_runs):
     averaged_predictions = {}
+    all_predictions = {}  # Store all predictions for each game for std dev and median
     game_details = {}  # Store game details from first iteration
     
     # Determine number of worker threads (use CPU count)
@@ -331,8 +335,10 @@ def main(num_runs):
                 for game_index, pred in iteration_predictions.items():
                     if game_index in averaged_predictions:
                         averaged_predictions[game_index] += pred
+                        all_predictions[game_index].append(pred)
                     else:
                         averaged_predictions[game_index] = pred
+                        all_predictions[game_index] = [pred]
                 
                 completed += 1
                 if completed % 100 == 0:
@@ -341,16 +347,24 @@ def main(num_runs):
             except Exception as e:
                 logging.error(f"Iteration {iteration} generated an exception: {e}")
     
-    # Calculate and log final averages with team names
+    # Calculate and log final averages with team names, std dev, and median
     logging.info("\n=== FINAL AVERAGED PREDICTIONS ===")
     for game_index in sorted(averaged_predictions.keys()):
+        predictions_array = np.array(all_predictions[game_index])
         average_pred = round(averaged_predictions[game_index] / num_runs, 1)
+        std_dev = round(np.std(predictions_array), 2)
+        median_pred = round(np.median(predictions_array), 1)
         
         if game_index in game_details:
             info = game_details[game_index]
-            logging.info(f"{game_index}|{info['home_team']}|{info['away_team']}|{info['week']}|{info['year']}|{average_pred}|{info['actual_score_difference']}")
+            logging.info(
+                f"Game {game_index}: {info['away_team']} @ {info['home_team']} (Week {info['week']}, {info['year']}) | "
+                f"Mean: {average_pred} | Median: {median_pred} | StdDev: {std_dev} | Actual: {info['actual_score_difference']}"
+            )
+            # Also log all individual predictions for this game
+            #logging.info(f"  All predictions for Game {game_index}: {sorted(all_predictions[game_index])}")
         else:
-            logging.info(f"Game {game_index}: {average_pred}")
+            logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
 
     logging.info("Projections complete!")
 
