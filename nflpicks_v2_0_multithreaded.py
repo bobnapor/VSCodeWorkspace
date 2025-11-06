@@ -3,12 +3,15 @@ import numpy as np
 from bs4 import BeautifulSoup
 from bs4 import Comment
 from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.utils import resample
 import logging
-from concurrent.futures import ProcessPoolExecutor
-import functools
+import concurrent.futures
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,118 +23,86 @@ def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Foot
 off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
 
 # Columns to use for stats
-stat_columns_to_use = frozenset({
+stat_columns_to_use = {
     'team',
     'pass_yds',
     'rush_yds',
     'turnovers'
-})
+}
+
 
 def is_numeric_value(value):
     try:
-        float(value)
+        int(value)
         return True
-    except (ValueError, TypeError):
+    except ValueError:
         return False
 
-@functools.lru_cache(maxsize=128)
-def get_offense_stats(html_content, year_str):
+
+def get_offense_stats(full_offense_soup, year_str):
     single_year_offense = []
-    soup = BeautifulSoup(html_content, 'html.parser')
-    
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+    for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
         offense_soup = BeautifulSoup(comment, 'html.parser')
         offense_table = offense_soup.find('table', id='team_stats')
         if offense_table:
             offense_rows = offense_table.find('tbody').find_all('tr')
             for offense_row in offense_rows:
-                cols = {col['data-stat']: col.text.strip() for col in offense_row.find_all('td') if col['data-stat'] in stat_columns_to_use or col['data-stat'] == 'g'}
-                if 'team' not in cols:
-                    continue
-                    
-                num_games = float(cols.get('g', '0') or '0')
-                if num_games == 0:
-                    continue
-                    
-                single_team_offense = {
-                    stat: '0' if not cols.get(stat) else 
-                    str(float(cols[stat])/num_games) if is_numeric_value(cols[stat]) else 
-                    cols[stat] 
-                    for stat in stat_columns_to_use if stat in cols
-                }
-                
-                if single_team_offense.get('team'):  # Only add if team exists
+                num_games = int(next((col.text for col in offense_row.find_all('td') if col['data-stat'] == 'g'), '0'))
+                single_team_offense = {col['data-stat']: '0' if col.text.strip() == '' else str(int(col.text)/num_games) if is_numeric_value(col.text) else col.text for col in offense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
+                team = single_team_offense.get('team')
+                if team:
                     single_year_offense.append(single_team_offense)
-                
+                    #logging.info(f'Extracted offensive data for the {year_str} {team}')
     return pd.DataFrame(single_year_offense)
 
-@functools.lru_cache(maxsize=128)
-def get_defense_stats(html_content, year_str):
-    soup = BeautifulSoup(html_content, 'html.parser')
+
+def get_defense_stats(full_defense_soup, year_str):
     single_year_defense = []
-    defense_table = soup.find('table', id='team_stats')
+    defense_table = full_defense_soup.find('table', id='team_stats')
     if not defense_table:
         return pd.DataFrame()
-        
     defense_rows = defense_table.find('tbody').find_all('tr')
     for defense_row in defense_rows:
-        cols = {col['data-stat']: col.text.strip() for col in defense_row.find_all('td') if col['data-stat'] in stat_columns_to_use or col['data-stat'] == 'g'}
-        if 'team' not in cols:
-            continue
-            
-        num_games = float(cols.get('g', '0') or '0')
-        if num_games == 0:
-            continue
-            
-        single_team_defense = {
-            f'def_{stat}': '0' if not cols.get(stat) else 
-            str(float(cols[stat])/num_games) if is_numeric_value(cols[stat]) else 
-            cols[stat] 
-            for stat in stat_columns_to_use if stat in cols
-        }
-        
-        if single_team_defense.get('def_team'):  # Only add if team exists
+        num_games = int(next((col.text for col in defense_row.find_all('td') if col['data-stat'] == 'g'), '0'))
+        single_team_defense = {f'def_{col["data-stat"]}': '0' if col.text.strip() == '' else str(int(col.text)/num_games) if is_numeric_value(col.text) else col.text for col in defense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
+        team = single_team_defense.get('def_team')
+        if team:
             single_year_defense.append(single_team_defense)
-        
+            #logging.info(f'Extracted defense data for the {year_str} {team}')
     return pd.DataFrame(single_year_defense)
 
-@functools.lru_cache(maxsize=128)
-def get_games(html_content, year_str):
-    soup = BeautifulSoup(html_content, 'html.parser')
-    games_table = soup.find('table', id='games')
-    if not games_table:
-        return pd.DataFrame(), pd.DataFrame()
-        
+
+def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, year_str):
+    single_year_defense_df.rename(columns={'def_team':'team'}, inplace=True)
+    single_year_combined_stats = pd.merge(single_year_offense_df, single_year_defense_df, on='team')
+    single_year_combined_stats['year'] = year_str
+    return single_year_combined_stats
+
+
+def get_games(full_games_soup, year_str):
+    games_table = full_games_soup.find('table', id='games')
     games_list_past = []
     games_list_future = []
-    
-    tbody = games_table.find('tbody')
-    if not tbody:
-        return pd.DataFrame(), pd.DataFrame()
-        
-    for game_row in tbody.find_all('tr'):
-        th = game_row.find('th')
-        if not th:
+
+    for game_row in games_table.find('tbody').find_all('tr'):
+        this_game_week_num = game_row.find_all('th')[0].text.strip()
+        game_stats = {col['data-stat']: col.text for col in game_row.find_all('td')}
+        if not game_stats or 'game_date' not in game_stats or 'winner' not in game_stats or 'loser' not in game_stats or this_game_week_num == '':
             continue
-        this_game_week_num = th.text.strip()
-        if not this_game_week_num:
-            continue
-            
-        cols = {col['data-stat']: col.text.strip() for col in game_row.find_all('td')}
-        if not cols or 'game_date' not in cols or 'winner' not in cols or 'loser' not in cols:
-            continue
-            
-        away_team = cols['winner'] if cols.get('game_location') == '@' else cols['loser']
-        home_team = cols['loser'] if away_team == cols['winner'] else cols['winner']
-        
-        if cols.get('pts_win') and cols.get('pts_lose'):
-            winner_score = int(cols['pts_win'])
-            loser_score = int(cols['pts_lose'])
-            score_difference = winner_score - loser_score if home_team == cols['winner'] else loser_score - winner_score
-            
+
+        game_date = game_stats['game_date']
+        away_team = game_stats['winner'] if game_stats.get('game_location') == '@' else game_stats['loser']
+        home_team = game_stats['loser'] if away_team == game_stats['winner'] else game_stats['winner']
+
+        if game_stats['pts_win'] != '' and game_stats['pts_lose'] != '':
+            winner_score = int(game_stats['pts_win'])
+            loser_score = int(game_stats['pts_lose'])
+            score_difference = winner_score - loser_score if home_team == game_stats['winner'] else loser_score - winner_score
+
             games_list_past.append({
                 'week_number': this_game_week_num,
-                'game_date': cols['game_date'],
+                
+                'game_date': game_date,
                 'away_team': away_team,
                 'home_team': home_team,
                 'score_difference': score_difference,
@@ -140,161 +111,249 @@ def get_games(html_content, year_str):
         else:
             games_list_future.append({
                 'week_number': this_game_week_num,
-                'game_date': cols['game_date'],
+                'game_date': game_date,
                 'away_team': away_team,
                 'home_team': home_team,
                 'score_difference': 0,
                 'year': year_str
             })
-            
+
     return pd.DataFrame(games_list_past), pd.DataFrame(games_list_future)
 
-def load_data_for_year(year):
-    year_str = str(year)
-    try:
-        # Read files once and cache content
-        with open(off_template.replace('yyyy', year_str)) as f:
-            offense_content = f.read()
-        with open(def_template.replace('yyyy', year_str)) as f:
-            defense_content = f.read()
-        with open(games_template.replace('yyyy', year_str)) as f:
-            games_content = f.read()
-            
-        offense_df = get_offense_stats(offense_content, year_str)
-        defense_df = get_defense_stats(defense_content, year_str)
-        
-        # Merge stats
-        defense_df.rename(columns={'def_team':'team'}, inplace=True)
-        combined_stats = pd.merge(offense_df, defense_df, on='team', how='inner')
-        combined_stats['year'] = year_str
-        
-        games_past, games_future = get_games(games_content, year_str)
-        
-        return combined_stats, games_past, games_future
-        
-    except Exception as e:
-        logging.error(f"Error processing year {year}: {str(e)}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-def process_single_run(iteration, years_range, features):
-    logging.info(f"Running simulation {iteration + 1}")
-    
-    # Load and process data for all years
-    all_data = [load_data_for_year(year) for year in years_range]
-    
-    # Filter out empty DataFrames
-    all_data = [data for data in all_data if not data[0].empty and not data[1].empty]
-    
-    if not all_data:
-        logging.error("No valid data loaded")
-        return {}
-    
-    multi_year_combined_stats = pd.concat([data[0] for data in all_data], ignore_index=True)
-    multi_year_games_history = pd.concat([data[1] for data in all_data], ignore_index=True)
-    multi_year_games_future = pd.concat([data[2] for data in all_data], ignore_index=True)
-    
-    # Prepare the data
-    merged_data = multi_year_games_history.merge(
-        multi_year_combined_stats, how='left', left_on=['year', 'home_team'], right_on=['year', 'team']
+def preprocess_data(football_data, games):
+    merged_data = games.merge(
+        football_data, how='left', left_on=['year', 'home_team'], right_on=['year', 'team']
     ).merge(
-        multi_year_combined_stats, how='left', left_on=['year', 'away_team'], right_on=['year', 'team'], 
-        suffixes=('_home', '_away')
+        football_data, how='left', left_on=['year', 'away_team'], right_on=['year', 'team'], suffixes=('_home', '_away')
     )
-    
-    # Drop rows with missing values
+
+    features = [
+        'pass_yds_home', 'def_pass_yds_home', 'rush_yds_home', 'def_rush_yds_home', 'turnovers_home', 'def_turnovers_home',
+        'pass_yds_away', 'def_pass_yds_away', 'rush_yds_away', 'def_rush_yds_away', 'turnovers_away', 'def_turnovers_away'
+    ]
     merged_data = merged_data.dropna(subset=features + ['score_difference'])
-    
-    if merged_data.empty:
-        logging.error("No valid training data after merging")
-        return {}
-    
+
+    return merged_data, features
+
+
+def calculate_prediction_intervals(model, X, y, X_test, n_iterations=100, alpha=0.05):
+    predictions = []
+    for _ in range(n_iterations):
+        X_resample, y_resample = resample(X, y)
+        model.fit(X_resample, y_resample)
+        predictions.append(model.predict(X_test))
+
+    predictions = np.array(predictions)
+    lower_bound = np.percentile(predictions, 100 * alpha / 2, axis=0)
+    upper_bound = np.percentile(predictions, 100 * (1 - alpha / 2), axis=0)
+
+    return lower_bound, upper_bound
+
+
+def predict_game(home_team, away_team, year, football_data, model):
+    home_stats = football_data[(football_data['team'] == home_team) & (football_data['year'] == year)]
+    away_stats = football_data[(football_data['team'] == away_team) & (football_data['year'] == year)]
+
+    if home_stats.empty or away_stats.empty:
+        raise ValueError("Team statistics for the specified year not found.")
+
+    input_features = pd.DataFrame([{
+        'pass_yds_home': home_stats['pass_yds'].values[0],
+        'def_pass_yds_home': home_stats['def_pass_yds'].values[0],
+        'rush_yds_home': home_stats['rush_yds'].values[0],
+        'def_rush_yds_home': home_stats['def_rush_yds'].values[0],
+        'turnovers_home': home_stats['turnovers'].values[0],
+        'def_turnovers_home': home_stats['def_turnovers'].values[0],
+        'pass_yds_away': away_stats['pass_yds'].values[0],
+        'def_pass_yds_away': away_stats['def_pass_yds'].values[0],
+        'rush_yds_away': away_stats['rush_yds'].values[0],
+        'def_rush_yds_away': away_stats['def_rush_yds'].values[0],
+        'turnovers_away': away_stats['turnovers'].values[0],
+        'def_turnovers_away': away_stats['def_turnovers'].values[0]
+    }])
+
+    predicted_score_difference = model.predict(input_features)[0]
+    return predicted_score_difference
+
+
+def load_data_for_year(year, off_template, def_template, games_template):
+    year_str = str(year)
+
+    with open(off_template.replace('yyyy', year_str)) as offense_file:
+        offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
+        single_year_offense = get_offense_stats(offense_soup, year_str)
+
+    with open(def_template.replace('yyyy', year_str)) as defense_file:
+        defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
+        single_year_defense = get_defense_stats(defense_soup, year_str)
+
+    single_year_combined_stats = get_single_year_team_stats(single_year_offense, single_year_defense, year_str)
+
+    with open(games_template.replace('yyyy', year_str)) as games_file:
+        games_soup = BeautifulSoup(games_file.read(), 'html.parser')
+        single_year_games_past, single_year_games_future = get_games(games_soup, year_str)
+
+    return single_year_combined_stats, single_year_games_past, single_year_games_future
+
+
+def run_single_iteration(iteration, off_template, def_template, games_template):
+    """Run a single iteration of the simulation"""
+    logging.info(f"Running simulation {iteration + 1}")
+    all_years_team_stats_arr = []
+    all_games_history_arr = []
+    all_games_future_arr = []
+
+    for year in range(2019, 2026):
+        single_year_combined_stats, single_year_games_past, single_year_games_future = load_data_for_year(
+            year, off_template, def_template, games_template
+        )
+        all_years_team_stats_arr.append(single_year_combined_stats)
+        all_games_history_arr.append(single_year_games_past)
+        all_games_future_arr.append(single_year_games_future)
+
+    multi_year_combined_stats = pd.concat(all_years_team_stats_arr, ignore_index=True)
+    multi_year_games_history = pd.concat(all_games_history_arr, ignore_index=True)
+    multi_year_games_future = pd.concat(all_games_future_arr, ignore_index=True)
+
+    # Prepare the data
+    merged_data, features = preprocess_data(multi_year_combined_stats, multi_year_games_history)
+
+    # Split the data into train and test sets
     X = merged_data[features]
     y = merged_data['score_difference']
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Define the models
+    models = {
+        'Linear Regression': LinearRegression(),
+    }
+
+    # Train and evaluate each model
+    results = {}
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+
+        # Cross-validation
+        cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+        
+        # Predict and evaluate the model
+        y_pred = model.predict(X_test)
+        score_rmse = np.sqrt(np.mean((y_pred - y_test) ** 2))
+        score_mae = mean_absolute_error(y_test, y_pred)
+        score_r2 = r2_score(y_test, y_pred)
+
+        results[name] = {
+            'model': model,
+            'cv_scores': cv_scores,
+            'mean_cv_score': np.mean(cv_scores),
+            'rmse': score_rmse,
+            'mae': score_mae,
+            'r2': score_r2
+        }
+
+    best_model_name = min(results, key=lambda k: results[k]['mae'])
+    best_model = results[best_model_name]['model']
+
+    predict_start_year_inc = 2025
+    predict_end_year_exc = 2026
+    predict_start_week_inc = 10
+    predict_end_week_exc = 11
+
+    input_games_by_year_and_week = []
+    for input_year in range(predict_start_year_inc, predict_end_year_exc):
+        for input_week in range(predict_start_week_inc, predict_end_week_exc):
+            input_games_by_year_and_week.append(multi_year_games_future[
+                (multi_year_games_future['week_number'] == str(input_week)) & 
+                (multi_year_games_future['year'] == str(input_year))
+            ])
+
+    input_games = pd.concat(input_games_by_year_and_week, ignore_index=True)
+    iteration_predictions = {}
+    game_info = {}  # Store game details for logging later
     
-    # Train model
-    model = LinearRegression()
-    model.fit(X, y)
-    
-    # Process future games
-    predictions = {}
-    future_games = multi_year_games_future[
-        (multi_year_games_future['year'].astype(str) >= '2024') & 
-        (multi_year_games_future['week_number'].astype(int) >= 15) &
-        (multi_year_games_future['week_number'].astype(int) < 16)
-    ]
-    
-    for idx, game in future_games.iterrows():
+    for index, game in input_games.iterrows():
+        home_team = game['home_team']
+        away_team = game['away_team']
+        input_week = game['week_number']
+        input_year = game['year']
+        actual_score_difference = game['score_difference']
+        
         try:
-            home_stats = multi_year_combined_stats[
-                (multi_year_combined_stats['team'] == game['home_team']) & 
-                (multi_year_combined_stats['year'] == game['year'])
-            ]
-            away_stats = multi_year_combined_stats[
-                (multi_year_combined_stats['team'] == game['away_team']) & 
-                (multi_year_combined_stats['year'] == game['year'])
-            ]
-            
-            if home_stats.empty or away_stats.empty:
-                continue
-            
-            # Create input features dictionary - Python 3.8 compatible version
-            input_features_dict = {}
-            # Add home stats
-            for stat in ['pass_yds', 'def_pass_yds', 'rush_yds', 'def_rush_yds', 'turnovers', 'def_turnovers']:
-                input_features_dict[f"{stat}_home"] = home_stats[stat].iloc[0]
-            # Add away stats
-            for stat in ['pass_yds', 'def_pass_yds', 'rush_yds', 'def_rush_yds', 'turnovers', 'def_turnovers']:
-                input_features_dict[f"{stat}_away"] = away_stats[stat].iloc[0]
-            
-            input_features = pd.DataFrame([input_features_dict])
-            
-            pred = model.predict(input_features)[0]
-            predictions[idx] = pred
-            
-        except Exception as e:
-            logging.error(f"Error processing game {idx}: {str(e)}")
-            continue
+            projected_score_difference = round(
+                predict_game(home_team, away_team, input_year, multi_year_combined_stats, best_model), 1
+            )
+            iteration_predictions[index] = projected_score_difference
+            # Store game info for final logging
+            game_info[index] = {
+                'home_team': home_team,
+                'away_team': away_team,
+                'week': input_week,
+                'year': input_year,
+                'actual_score_difference': actual_score_difference
+            }
+        except ValueError as e:
+            logging.error(f"Could not predict score difference for {home_team} vs {away_team}: {e}")
     
-    return predictions
+    logging.info(f"Completed simulation {iteration + 1}")
+    return iteration_predictions, game_info
+
 
 def main(num_runs):
-    years_range = range(2018, 2025)
-    features = [
-        'pass_yds_home', 'def_pass_yds_home', 'rush_yds_home', 'def_rush_yds_home', 
-        'turnovers_home', 'def_turnovers_home', 'pass_yds_away', 'def_pass_yds_away', 
-        'rush_yds_away', 'def_rush_yds_away', 'turnovers_away', 'def_turnovers_away'
-    ]
+    averaged_predictions = {}
+    game_details = {}  # Store game details from first iteration
     
-    # Calculate chunk size for parallel processing
-    chunk_size = max(1, num_runs // (ProcessPoolExecutor()._max_workers or 1))
+    # Determine number of worker threads (use CPU count)
+    max_workers = min(32, (os.cpu_count() or 1) * 2)
+    logging.info(f"Using {max_workers} worker processes")
     
-    # Use ProcessPoolExecutor for parallel processing
-    with ProcessPoolExecutor() as executor:
-        futures = [
-            executor.submit(process_single_run, i, years_range, features)
+    # Use ProcessPoolExecutor for CPU-bound tasks
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all iterations
+        futures = {
+            executor.submit(run_single_iteration, i, off_template, def_template, games_template): i 
             for i in range(num_runs)
-        ]
+        }
         
-        # Collect results
-        all_predictions = {}
-        for future in futures:
+        # Collect results as they complete
+        completed = 0
+        for future in concurrent.futures.as_completed(futures):
+            iteration = futures[future]
             try:
-                predictions = future.result()
-                for idx, pred in predictions.items():
-                    if idx in all_predictions:
-                        all_predictions[idx].append(pred)
+                iteration_predictions, game_info = future.result()
+                
+                # Store game details from first completed iteration
+                if not game_details:
+                    game_details = game_info
+                
+                # Accumulate predictions
+                for game_index, pred in iteration_predictions.items():
+                    if game_index in averaged_predictions:
+                        averaged_predictions[game_index] += pred
                     else:
-                        all_predictions[idx] = [pred]
+                        averaged_predictions[game_index] = pred
+                
+                completed += 1
+                if completed % 100 == 0:
+                    logging.info(f"Progress: {completed}/{num_runs} iterations completed")
+                    
             except Exception as e:
-                logging.error(f"Error processing simulation: {str(e)}")
-                continue
+                logging.error(f"Iteration {iteration} generated an exception: {e}")
     
-    # Calculate and log final averages
-    for idx, preds in all_predictions.items():
-        if preds:  # Only process if we have predictions
-            avg_pred = round(np.mean(preds), 1)
-            std_dev = round(np.std(preds), 2)
-            logging.info(f"{idx}|{avg_pred}|{std_dev}")
+    # Calculate and log final averages with team names
+    logging.info("\n=== FINAL AVERAGED PREDICTIONS ===")
+    for game_index in sorted(averaged_predictions.keys()):
+        average_pred = round(averaged_predictions[game_index] / num_runs, 1)
+        
+        if game_index in game_details:
+            info = game_details[game_index]
+            logging.info(f"{game_index}|{info['home_team']}|{info['away_team']}|{info['week']}|{info['year']}|{average_pred}|{info['actual_score_difference']}")
+        else:
+            logging.info(f"Game {game_index}: {average_pred}")
+
+    logging.info("Projections complete!")
+
 
 if __name__ == "__main__":
-    main(10000)
+    main(10000)  # Should now run much faster with multiprocessing
