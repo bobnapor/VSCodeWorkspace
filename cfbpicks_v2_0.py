@@ -185,9 +185,6 @@ def get_games(full_games_soup, year_str):
         if not week_number:
             continue
 
-        if week_number == '17' and year_str == '2025':
-            print("Debug")
-
         # Clean team names to remove rankings and normalize
         winner_raw = cols.get('winner_school_name', '')
         loser_raw = cols.get('loser_school_name', '')
@@ -475,4 +472,4 @@ def main(num_runs, predict_start_year_inc=2024, predict_end_year_exc=2025, predi
 
 
 if __name__ == "__main__":
-    main(num_runs=1, predict_start_year_inc=2025, predict_end_year_exc=2026, predict_start_week_inc=17, predict_end_week_exc=19)
+    main(num_runs=1, predict_start_year_inc=2025, predict_end_year_exc=2026, predict_start_week_inc=17, predict_end_week_exc=22)
