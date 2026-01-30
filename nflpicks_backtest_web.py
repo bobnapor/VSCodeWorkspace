@@ -1,7 +1,12 @@
+"""
+NFL Picks Backtest Script (Web Version)
+
+This script imports core functions from nflpicks_v2_0_multithreaded_web.py
+to ensure consistency between predictions and backtesting.
+"""
+
 import pandas as pd
 import numpy as np
-from bs4 import BeautifulSoup
-from bs4 import Comment
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.utils import resample
@@ -9,266 +14,22 @@ import logging
 import concurrent.futures
 import os
 from datetime import datetime
-import requests
 import time
 
-# URL templates for web scraping
-games_url = 'https://www.pro-football-reference.com/years/yyyy/games.htm'
-def_url = 'https://www.pro-football-reference.com/years/yyyy/opp.htm'
-off_url = 'https://www.pro-football-reference.com/years/yyyy/'
-
-# Optional: Keep file templates as fallback
-file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
-games_template = file_dir + 'yyyy NFL Regular Season Schedule _ Pro-Football-Reference.com.html'
-def_template = file_dir + 'yyyy NFL Opposition & Defensive Statistics _ Pro-Football-Reference.com.html'
-off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Reference.com.html'
-
-# Columns to use for stats
-stat_columns_to_use = {
-    'team',
-    'pass_yds',
-    'rush_yds',
-    'turnovers'
-}
+# Import core functions from the main prediction script
+from nflpicks_v2_0_multithreaded_web import (
+    load_data_for_year,
+    preprocess_data,
+    predict_game,
+    translate_week_number,
+    get_last_regular_season_week,
+    off_url,
+    def_url,
+    games_url
+)
 
 
-def is_numeric_value(value):
-    try:
-        int(value)
-        return True
-    except ValueError:
-        return False
-
-
-def fetch_url_with_retry(url, max_retries=3, delay=2):
-    """Fetch URL content with retry logic and rate limiting"""
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-    
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            return response.text
-        except requests.RequestException as e:
-            if attempt < max_retries - 1:
-                time.sleep(delay * (attempt + 1))  # Exponential backoff
-            else:
-                raise e
-    return None
-
-
-def get_offense_stats(full_offense_soup, year_str):
-    single_year_offense = []
-    for comment in full_offense_soup.find_all(string=lambda text: isinstance(text, Comment)):
-        offense_soup = BeautifulSoup(comment, 'html.parser')
-        offense_table = offense_soup.find('table', id='team_stats')
-        if offense_table:
-            offense_rows = offense_table.find('tbody').find_all('tr')
-            for offense_row in offense_rows:
-                num_games = int(next((col.text for col in offense_row.find_all('td') if col['data-stat'] == 'g'), '0'))
-                single_team_offense = {col['data-stat']: '0' if col.text.strip() == '' else str(int(col.text)/num_games) if is_numeric_value(col.text) else col.text for col in offense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
-                team = single_team_offense.get('team')
-                if team:
-                    single_year_offense.append(single_team_offense)
-    return pd.DataFrame(single_year_offense)
-
-
-def get_defense_stats(full_defense_soup, year_str):
-    single_year_defense = []
-    defense_table = full_defense_soup.find('table', id='team_stats')
-    if not defense_table:
-        return pd.DataFrame()
-    defense_rows = defense_table.find('tbody').find_all('tr')
-    for defense_row in defense_rows:
-        num_games = int(next((col.text for col in defense_row.find_all('td') if col['data-stat'] == 'g'), '0'))
-        single_team_defense = {f'def_{col["data-stat"]}': '0' if col.text.strip() == '' else str(int(col.text)/num_games) if is_numeric_value(col.text) else col.text for col in defense_row.find_all('td') if col['data-stat'] in stat_columns_to_use}
-        team = single_team_defense.get('def_team')
-        if team:
-            single_year_defense.append(single_team_defense)
-    return pd.DataFrame(single_year_defense)
-
-
-def get_single_year_team_stats(single_year_offense_df, single_year_defense_df, year_str):
-    single_year_defense_df.rename(columns={'def_team':'team'}, inplace=True)
-    single_year_combined_stats = pd.merge(single_year_offense_df, single_year_defense_df, on='team')
-    single_year_combined_stats['year'] = year_str
-    return single_year_combined_stats
-
-
-def get_games(full_games_soup, year_str):
-    """Parse games from HTML and return past and future games DataFrames"""
-    games_table = full_games_soup.find('table', id='games')
-    games_list_past = []
-    games_list_future = []
-
-    for game_row in games_table.find('tbody').find_all('tr'):
-        this_game_week_num = game_row.find_all('th')[0].text.strip()
-        game_stats = {col['data-stat']: col.text for col in game_row.find_all('td')}
-        if not game_stats or 'game_date' not in game_stats or 'winner' not in game_stats or 'loser' not in game_stats or this_game_week_num == '':
-            continue
-
-        game_date = game_stats['game_date']
-        away_team = game_stats['winner'] if game_stats.get('game_location') == '@' else game_stats['loser']
-        home_team = game_stats['loser'] if away_team == game_stats['winner'] else game_stats['winner']
-
-        if game_stats['pts_win'] != '' and game_stats['pts_lose'] != '':
-            winner_score = int(game_stats['pts_win'])
-            loser_score = int(game_stats['pts_lose'])
-            score_difference = winner_score - loser_score if home_team == game_stats['winner'] else loser_score - winner_score
-
-            games_list_past.append({
-                'week_number': this_game_week_num,
-                'game_date': game_date,
-                'away_team': away_team,
-                'home_team': home_team,
-                'score_difference': score_difference,
-                'year': year_str
-            })
-        else:
-            games_list_future.append({
-                'week_number': this_game_week_num,
-                'game_date': game_date,
-                'away_team': away_team,
-                'home_team': home_team,
-                'score_difference': 0,
-                'year': year_str
-            })
-
-    return pd.DataFrame(games_list_past), pd.DataFrame(games_list_future)
-
-
-def preprocess_data(football_data, games):
-    merged_data = games.merge(
-        football_data, how='left', left_on=['year', 'home_team'], right_on=['year', 'team']
-    ).merge(
-        football_data, how='left', left_on=['year', 'away_team'], right_on=['year', 'team'], suffixes=('_home', '_away')
-    )
-
-    features = [
-        'pass_yds_home', 'def_pass_yds_home', 'rush_yds_home', 'def_rush_yds_home', 'turnovers_home', 'def_turnovers_home',
-        'pass_yds_away', 'def_pass_yds_away', 'rush_yds_away', 'def_rush_yds_away', 'turnovers_away', 'def_turnovers_away'
-    ]
-    merged_data = merged_data.dropna(subset=features + ['score_difference'])
-
-    return merged_data, features
-
-
-def predict_game(home_team, away_team, year, football_data, model):
-    home_stats = football_data[(football_data['team'] == home_team) & (football_data['year'] == year)]
-    away_stats = football_data[(football_data['team'] == away_team) & (football_data['year'] == year)]
-
-    if home_stats.empty or away_stats.empty:
-        raise ValueError("Team statistics for the specified year not found.")
-
-    input_features = pd.DataFrame([{
-        'pass_yds_home': home_stats['pass_yds'].values[0],
-        'def_pass_yds_home': home_stats['def_pass_yds'].values[0],
-        'rush_yds_home': home_stats['rush_yds'].values[0],
-        'def_rush_yds_home': home_stats['def_rush_yds'].values[0],
-        'turnovers_home': home_stats['turnovers'].values[0],
-        'def_turnovers_home': home_stats['def_turnovers'].values[0],
-        'pass_yds_away': away_stats['pass_yds'].values[0],
-        'def_pass_yds_away': away_stats['def_pass_yds'].values[0],
-        'rush_yds_away': away_stats['rush_yds'].values[0],
-        'def_rush_yds_away': away_stats['def_rush_yds'].values[0],
-        'turnovers_away': away_stats['turnovers'].values[0],
-        'def_turnovers_away': away_stats['def_turnovers'].values[0]
-    }])
-
-    predicted_score_difference = model.predict(input_features)[0]
-    return predicted_score_difference
-
-
-def load_data_for_year(year, use_web=True):
-    """Load data for a year from web URLs or local files"""
-    year_str = str(year)
-
-    if use_web:
-        # Fetch from web
-        off_html = fetch_url_with_retry(off_url.replace('yyyy', year_str))
-        offense_soup = BeautifulSoup(off_html, 'html.parser')
-        single_year_offense = get_offense_stats(offense_soup, year_str)
-
-        def_html = fetch_url_with_retry(def_url.replace('yyyy', year_str))
-        defense_soup = BeautifulSoup(def_html, 'html.parser')
-        single_year_defense = get_defense_stats(defense_soup, year_str)
-
-        single_year_combined_stats = get_single_year_team_stats(
-            single_year_offense, single_year_defense, year_str
-        )
-
-        games_html = fetch_url_with_retry(games_url.replace('yyyy', year_str))
-        games_soup = BeautifulSoup(games_html, 'html.parser')
-        single_year_games_past, single_year_games_future = get_games(games_soup, year_str)
-    else:
-        # Fallback to local files
-        with open(off_template.replace('yyyy', year_str)) as offense_file:
-            offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
-            single_year_offense = get_offense_stats(offense_soup, year_str)
-
-        with open(def_template.replace('yyyy', year_str)) as defense_file:
-            defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
-            single_year_defense = get_defense_stats(defense_soup, year_str)
-
-        single_year_combined_stats = get_single_year_team_stats(
-            single_year_offense, single_year_defense, year_str
-        )
-
-        with open(games_template.replace('yyyy', year_str)) as games_file:
-            games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-            single_year_games_past, single_year_games_future = get_games(games_soup, year_str)
-
-    return single_year_combined_stats, single_year_games_past, single_year_games_future
-
-
-def translate_week_number(week_str, year):
-    """Translate playoff week names to numeric values based on season year.
-    
-    2021+ seasons (18-game regular season):
-        WildCard -> 19, Division -> 20, ConfChamp -> 21, SuperBowl -> 22
-    2020 and earlier (17-game regular season):
-        WildCard -> 18, Division -> 19, ConfChamp -> 20, SuperBowl -> 21
-    """
-    year_int = int(year)
-    
-    # Check if already numeric
-    if week_str.isdigit():
-        return int(week_str)
-    
-    # Playoff week translations
-    if year_int >= 2021:
-        # 18-game season (2021+)
-        translations = {
-            'WildCard': 19,
-            'Division': 20,
-            'ConfChamp': 21,
-            'SuperBowl': 22
-        }
-    else:
-        # 17-game season (2020 and earlier)
-        translations = {
-            'WildCard': 18,
-            'Division': 19,
-            'ConfChamp': 20,
-            'SuperBowl': 21
-        }
-    
-    return translations.get(week_str, None)
-
-
-def get_last_regular_season_week(year):
-    """Get the last regular season week for a given year.
-    
-    2021+ seasons: 18 weeks
-    2020 and earlier: 17 weeks
-    """
-    year_int = int(year)
-    return 18 if year_int >= 2021 else 17
-
-
-def run_backtest_iteration(iteration, cached_data, test_year, test_weeks, include_playoffs):
+def run_backtest_iteration(iteration, cached_data, test_year, test_weeks):
     """Run a single iteration of the backtest simulation
     
     Args:
@@ -276,7 +37,6 @@ def run_backtest_iteration(iteration, cached_data, test_year, test_weeks, includ
         cached_data: Pre-loaded data dict with 'stats', 'all_games' DataFrames
         test_year: Year to test on
         test_weeks: List of numeric weeks to test (e.g., [1, 2, 3, ...])
-        include_playoffs: Whether test_weeks includes playoff weeks
     """
     
     # Use pre-loaded cached data
@@ -421,7 +181,7 @@ def calculate_backtest_metrics(all_predictions, game_details, num_runs):
     return pd.DataFrame(results)
 
 
-def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, include_playoffs=False, use_web=True, start_year=2019):
+def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, start_year=2019):
     """
     Backtest the model on past games using web data
     
@@ -430,7 +190,6 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, include_playof
         test_year: Year to test on
         test_weeks: List of weeks to test (e.g., [1, 2, 3, 4, 5]). 
                     For playoffs use 19=WildCard, 20=Division, 21=ConfChamp, 22=SuperBowl (for 2021+)
-        include_playoffs: Set True if test_weeks includes playoff weeks (19-22)
         use_web: True to fetch from web, False to use local files
         start_year: First year to load for training data
     """
@@ -462,7 +221,7 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, include_playof
     for year in range(start_year, test_year + 1):
         logging.info(f"  Loading {year} data...")
         single_year_combined_stats, single_year_games_past, single_year_games_future = load_data_for_year(
-            year, use_web=use_web
+            year, off_url, def_url, games_url, use_web=use_web
         )
         all_years_team_stats_arr.append(single_year_combined_stats)
         all_games_arr.append(single_year_games_past)
@@ -487,7 +246,7 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, include_playof
     
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(run_backtest_iteration, i, cached_data, test_year, test_weeks, include_playoffs): i 
+            executor.submit(run_backtest_iteration, i, cached_data, test_year, test_weeks): i 
             for i in range(num_runs)
         }
         
