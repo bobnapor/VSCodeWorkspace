@@ -24,13 +24,14 @@ import sys
 import argparse
 import warnings
 from datetime import datetime, date
-from collections import defaultdict
+from collections import defaultdict  # noqa: F401 — kept for downstream use
 
 import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup, Comment
 from sklearn.linear_model import Ridge
 from sklearn.utils import resample
+from joblib import Parallel, delayed  # noqa: F401 — available for future use
 
 warnings.filterwarnings('ignore')
 
@@ -934,7 +935,7 @@ def build_training_data_multiyear(games_by_year, stats_by_year,
 
 
 # ---------------------------------------------------------------------------
-# PREDICTION ENGINE — Monte Carlo with bootstrap resampling
+# PREDICTION ENGINE — vectorised bootstrap (no per-iteration Ridge fits)
 # ---------------------------------------------------------------------------
 
 def _fit_predict(X_train, y_train, X_pred):
@@ -944,10 +945,88 @@ def _fit_predict(X_train, y_train, X_pred):
     return float(model.predict(X_pred)[0])
 
 
+def _bootstrap_predict(X_np, y, X_pred_np, num_runs, alpha=1.0):
+    """
+    Vectorised Ridge bootstrap: fits `num_runs` models simultaneously
+    using a single batched least-squares solve instead of a Python loop.
+
+    X_np       : (n, p) float64 numpy array — training features
+    y          : (n,)   float64 numpy array — target
+    X_pred_np  : (g, p) float64 numpy array — prediction rows (g games)
+    alpha      : Ridge regularisation parameter
+
+    Returns (g, num_runs) float64 array of predictions.
+    """
+    n, p = X_np.shape
+    rng  = np.random.default_rng()
+
+    # Draw all bootstrap indices at once: (num_runs, n)
+    idx = rng.integers(0, n, size=(num_runs, n))
+
+    # Build augmented matrix for Ridge: append sqrt(alpha)*I to X and 0s to y
+    # so we can use least-squares directly.
+    # Augmented shapes: X_aug (n+p, p), y_aug (n+p,)
+    reg_row = np.sqrt(alpha) * np.eye(p)          # (p, p)
+    y_zeros = np.zeros(p)
+
+    # Pre-stack the regularisation rows — same for every bootstrap
+    X_reg = reg_row                               # (p, p) — appended each time
+
+    # Predictions accumulator: (g, num_runs)
+    g = X_pred_np.shape[0]
+    preds = np.empty((g, num_runs), dtype=np.float64)
+
+    # Choose chunk size so X_boot (chunk, n, p) stays under ~60 MB,
+    # keeping total peak usage (X_boot + X_aug + XtX + Xty) well inside
+    # the 2 GB limit of 32-bit Python.
+    bytes_per_row = n * p * 8          # float64 bytes for one bootstrap sample
+    target_bytes  = 60 * 1024 * 1024   # 60 MB budget per X_boot allocation
+    CHUNK = max(1, min(50, target_bytes // bytes_per_row))
+    print(f'  [bootstrap] n={n} p={p} chunk={CHUNK} '
+          f'(~{CHUNK*bytes_per_row//1024//1024}MB/alloc)')
+
+    for start in range(0, num_runs, CHUNK):
+        end   = min(start + CHUNK, num_runs)
+        chunk = end - start
+
+        # Gather bootstrapped samples for this chunk
+        # X_boot: (chunk, n, p),  y_boot: (chunk, n)
+        X_boot = X_np[idx[start:end]]             # (chunk, n, p)
+        y_boot = y[idx[start:end]]                # (chunk, n)
+
+        # Append Ridge regularisation rows to each bootstrap sample
+        # X_aug: (chunk, n+p, p),  y_aug: (chunk, n+p)
+        X_aug = np.concatenate(
+            [X_boot, np.tile(X_reg, (chunk, 1, 1))], axis=1
+        )
+        y_aug = np.concatenate(
+            [y_boot, np.tile(y_zeros, (chunk, 1))], axis=1
+        )
+
+        # Solve all chunk systems: coeffs (chunk, p)
+        # np.linalg.lstsq doesn't batch, so use the normal equations which
+        # do support batched matrix ops.
+        # (XᵀX) coeff = Xᵀy  — solved via batched matmul + solve
+        XtX  = np.einsum('bni,bnj->bij', X_aug, X_aug)   # (chunk, p, p)
+        Xty  = np.einsum('bni,bn->bi',  X_aug, y_aug)    # (chunk, p)
+        try:
+            coeffs = np.linalg.solve(XtX, Xty)           # (chunk, p)
+        except np.linalg.LinAlgError:
+            coeffs = np.linalg.lstsq(
+                XtX.reshape(-1, p, p)[0], Xty[0], rcond=None
+            )[0][np.newaxis].repeat(chunk, axis=0)
+
+        # Predict: (g, p) @ (chunk, p).T -> (chunk, g) -> transposed (g, chunk)
+        preds[:, start:end] = X_pred_np @ coeffs.T       # (g, chunk)
+
+    return preds
+
+
 def _run_iteration(X, y_diff, y_total, predict_rows):
     """
-    One bootstrap iteration: resample training data, fit 2 models,
+    One bootstrap iteration: resample training data, fit 2 Ridge models,
     predict all games.  Returns list of (pred_diff, pred_total).
+    Kept for compatibility; the main path uses _bootstrap_predict.
     """
     n = len(X)
     idx = resample(np.arange(n), n_samples=n, replace=True)
@@ -960,6 +1039,19 @@ def _run_iteration(X, y_diff, y_total, predict_rows):
         Xp = pd.DataFrame([row], columns=FEATURE_COLS).fillna(0)
         results.append((_fit_predict(Xb, yd, Xp), _fit_predict(Xb, yt, Xp)))
     return results
+
+
+def _run_batch(n_iter, X, y_diff, y_total, predict_rows):
+    """Batch of n_iter iterations — kept for reference."""
+    n_games = len(predict_rows)
+    all_diffs  = [[] for _ in range(n_games)]
+    all_totals = [[] for _ in range(n_games)]
+    for _ in range(n_iter):
+        iteration = _run_iteration(X, y_diff, y_total, predict_rows)
+        for i, (pd_val, pt_val) in enumerate(iteration):
+            all_diffs[i].append(pd_val)
+            all_totals[i].append(pt_val)
+    return all_diffs, all_totals
 
 
 def predict_games(games_today, team_stats, X, y_diff, y_total,
@@ -1018,19 +1110,31 @@ def predict_games(games_today, team_stats, X, y_diff, y_total,
         return []
 
     predict_rows = [feat for _, feat, _, _ in game_infos]
-    all_diffs = defaultdict(list)
-    all_totals = defaultdict(list)
 
-    for _ in range(num_runs):
-        iteration = _run_iteration(X, y_diff, y_total, predict_rows)
-        for i, (pd_val, pt_val) in enumerate(iteration):
-            all_diffs[i].append(pd_val)
-            all_totals[i].append(pt_val)
+    # Build numpy arrays for the vectorised bootstrap engine.
+    # X is a DataFrame; y_diff/y_total may already be numpy arrays.
+    X_np       = X.values.astype(np.float64)
+    y_diff_np  = np.asarray(y_diff,  dtype=np.float64)
+    y_total_np = np.asarray(y_total, dtype=np.float64)
+    X_pred_np  = np.array(
+        [pd.Series(r).reindex(FEATURE_COLS).fillna(0).values
+         for r in predict_rows],
+        dtype=np.float64
+    )
+
+    # Run all bootstraps in one vectorised call — no Python loop,
+    # no subprocess overhead.  Returns (g, num_runs) arrays.
+    diffs_mat  = _bootstrap_predict(
+        X_np, y_diff_np, X_pred_np, num_runs
+    )
+    totals_mat = _bootstrap_predict(
+        X_np, y_total_np, X_pred_np, num_runs
+    )
 
     output = []
     for i, (g, _, away_sp_name, home_sp_name) in enumerate(game_infos):
-        diffs = np.array(all_diffs[i])
-        totals = np.array(all_totals[i])
+        diffs  = diffs_mat[i]
+        totals = totals_mat[i]
 
         mean_diff = float(np.mean(diffs))
         mean_total = float(np.mean(totals))
@@ -1053,13 +1157,15 @@ def predict_games(games_today, team_stats, X, y_diff, y_total,
         ml_pick = g['home_team'] if mean_diff > 0 else g['away_team']
         ml_conf = max(home_win_pct, away_win_pct)
 
-        # Run-line pick
-        if home_cover_pct >= away_cover_pct:
-            rl_pick = f"{g['home_team']} -{game_rl}"
-            rl_conf = home_cover_pct
-        else:
-            rl_pick = f"{g['away_team']} +{game_rl}"
-            rl_conf = away_cover_pct
+        # Run-line pick: find the single most likely outcome among the
+        # three mutually exclusive results — home covers -1.5, away
+        # covers -1.5, or the margin falls within the push zone (≤1 run).
+        rl_outcomes = [
+            (home_cover_pct, f"{g['home_team']} -1.5"),
+            (away_cover_pct, f"{g['away_team']} -1.5"),
+            (push_pct,        "Push zone (<=1 run margin)"),
+        ]
+        rl_conf, rl_pick = max(rl_outcomes, key=lambda x: x[0])
 
         # Projected individual scores
         proj_home = (mean_total + mean_diff) / 2
