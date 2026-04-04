@@ -1,0 +1,44 @@
+2026-04-04 13:33:35,824 [INFO] __main__ — Crypto Signal Bot starting up.
+2026-04-04 13:33:35,824 [INFO] __main__ — Symbols  : ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'HYPE/USDT']
+2026-04-04 13:33:35,826 [INFO] __main__ — Mode     : PAPER TRADING (CoinGecko, no exchange needed)
+2026-04-04 13:33:35,826 [INFO] __main__ — Timeframe: 15m
+2026-04-04 13:33:35,826 [INFO] __main__ — Interval : every 15 minutes
+2026-04-04 13:33:35,826 [INFO] __main__ — Alert    : email
+2026-04-04 13:33:35,827 [INFO] __main__ — AutoTrade: PAPER
+2026-04-04 13:33:35,827 [INFO] __main__ — ------------------------------------------------------------
+2026-04-04 13:33:35,828 [INFO] __main__ — ============================================================
+2026-04-04 13:33:35,829 [INFO] __main__ — Running signal check at 2026-04-04 13:33:35
+2026-04-04 13:33:35,829 [INFO] __main__ — ============================================================
+2026-04-04 13:33:35,829 [INFO] crypto_signals — Analyzing BTC/USDT (paper/TradingView) ...
+2026-04-04 13:33:35,830 [INFO] crypto_paper — Connecting to TradingView without login (limited data — add TV_USERNAME/TV_PASSWORD in config).
+2026-04-04 13:33:35,830 [WARNING] tvDatafeed.main — you are using nologin method, data you access may be limited
+2026-04-04 13:33:35,997 [INFO] crypto_signals — === BTC/USDT @ $67,396.0000 ===
+  Consensus: NO SIGNAL (BUY=0, SELL=0)
+  RSI                 : —
+  MACD                : —
+  EMA Crossover       : —
+  Volume Spike        : —
+2026-04-04 13:33:36,013 [INFO] crypto_signals — Analyzing ETH/USDT (paper/TradingView) ...
+2026-04-04 13:33:36,528 [INFO] crypto_signals — === ETH/USDT @ $2,057.0700 ===
+  Consensus: NO SIGNAL (BUY=0, SELL=0)
+  RSI                 : —
+  MACD                : —
+  EMA Crossover       : —
+  Volume Spike        : —
+2026-04-04 13:33:36,528 [INFO] crypto_signals — Analyzing SOL/USDT (paper/TradingView) ...
+2026-04-04 13:33:37,049 [INFO] crypto_signals — === SOL/USDT @ $80.9700 ===
+  Consensus: NO SIGNAL (BUY=0, SELL=0)
+  RSI                 : —
+  MACD                : —
+  EMA Crossover       : —
+  Volume Spike        : —
+2026-04-04 13:33:37,050 [INFO] crypto_signals — Analyzing HYPE/USDT (paper/TradingView) ...
+2026-04-04 13:33:37,513 [INFO] crypto_signals — === HYPE/USDT @ $36.0500 ===
+  Consensus: NO SIGNAL (BUY=0, SELL=0)
+  RSI                 : —
+  MACD                : —
+  EMA Crossover       : —
+  Volume Spike        : —
+2026-04-04 13:33:37,513 [INFO] __main__ — No actionable signals. No alerts sent.
+2026-04-04 13:33:37,513 [INFO] __main__ — No signals — no paper trades executed.
+2026-04-04 13:33:37,513 [INFO] __main__ — Scheduler started. Next run in 15 minutes.
