@@ -63,11 +63,16 @@ def _get_tv():
 # TradingView OHLCV fetch
 # ---------------------------------------------------------------------------
 
-def fetch_ohlcv_tradingview(symbol: str) -> pd.DataFrame:
+def fetch_ohlcv_tradingview(
+    symbol: str, timeframe_override: str = None, n_bars_override: int = None
+) -> pd.DataFrame:
     """
     Fetch OHLCV data from TradingView for a given symbol (e.g. 'BTC/USDT').
     Returns a DataFrame with columns: open, high, low, close, volume.
     Symbol mapping is configured in TV_SYMBOL_MAP in crypto_config.py.
+
+    timeframe_override: use a different timeframe (e.g. '4h' for trend filter)
+    n_bars_override:    fetch a specific number of bars (e.g. for backtesting)
     """
     mapping = cfg.TV_SYMBOL_MAP.get(symbol)
     if not mapping:
@@ -77,19 +82,30 @@ def fetch_ohlcv_tradingview(symbol: str) -> pd.DataFrame:
         )
     tv_symbol, tv_exchange = mapping
 
-    interval = _TV_INTERVAL_MAP.get(cfg.TIMEFRAME)
+    tf = timeframe_override or cfg.TIMEFRAME
+    interval = _TV_INTERVAL_MAP.get(tf)
     if interval is None:
         raise ValueError(
-            f"Unsupported TIMEFRAME '{cfg.TIMEFRAME}'. "
+            f"Unsupported timeframe '{tf}'. "
             f"Choose from: {list(_TV_INTERVAL_MAP.keys())}"
         )
+
+    # Determine how many bars to request
+    if n_bars_override:
+        n_bars = n_bars_override
+    elif timeframe_override:
+        # Trend filter: fetch enough bars to warm up the EMA
+        trend_period = getattr(cfg, "TREND_EMA_PERIOD", 50)
+        n_bars = max(cfg.CANDLE_LIMIT, trend_period + 10)
+    else:
+        n_bars = cfg.CANDLE_LIMIT
 
     tv = _get_tv()
     df = tv.get_hist(
         symbol=tv_symbol,
         exchange=tv_exchange,
         interval=interval,
-        n_bars=cfg.CANDLE_LIMIT,
+        n_bars=n_bars,
     )
 
     if df is None or df.empty:
@@ -128,8 +144,13 @@ def _load_portfolio() -> dict:
 
 
 def _save_portfolio(portfolio: dict) -> None:
-    with open(cfg.PAPER_PORTFOLIO_FILE, "w") as f:
+    """Write portfolio atomically — write to .tmp then rename.
+    Prevents JSON corruption if the process is killed mid-write."""
+    path = Path(cfg.PAPER_PORTFOLIO_FILE)
+    tmp_path = path.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
         json.dump(portfolio, f, indent=2)
+    tmp_path.replace(path)  # atomic on all platforms
 
 
 def get_portfolio_summary(portfolio: dict, current_prices: dict) -> str:
@@ -160,20 +181,40 @@ def get_portfolio_summary(portfolio: dict, current_prices: dict) -> str:
 # Paper trade execution
 # ---------------------------------------------------------------------------
 
-def paper_execute(symbol: str, side: str, price: float):
+def paper_execute(symbol: str, side: str, price: float, atr_val=None):
     """
     Simulate a BUY or SELL for a symbol at the given price.
     Returns a human-readable trade confirmation string, or None if skipped.
-    side: 'BUY' or 'SELL'
+    side:    'BUY' or 'SELL'
+    atr_val: latest ATR value for volatility-scaled position sizing
     """
     portfolio = _load_portfolio()
     base = symbol.split("/")[0]
     now = datetime.now(timezone.utc).isoformat()
 
     if side == "BUY":
-        usdt_to_spend = (
-            portfolio["usdt_balance"] * cfg.TRADE_AMOUNT_FRACTION
-        )
+        # ATR-based position sizing: risk a fixed % of portfolio per ATR unit
+        if (
+            getattr(cfg, "ATR_SIZING_ENABLED", False)
+            and atr_val is not None
+            and atr_val > 0
+            and price > 0
+        ):
+            port_value = portfolio["usdt_balance"]
+            for pos in portfolio["holdings"].values():
+                port_value += pos["amount"] * pos["avg_cost"]
+            atr_pct = atr_val / price          # ATR as fraction of price
+            risk_usdt = port_value * cfg.ATR_RISK_PCT
+            usdt_to_spend = min(
+                risk_usdt / atr_pct,
+                port_value * cfg.MAX_TRADE_PCT,
+                portfolio["usdt_balance"],
+            )
+        else:
+            usdt_to_spend = (
+                portfolio["usdt_balance"] * cfg.TRADE_AMOUNT_FRACTION
+            )
+
         if usdt_to_spend < 1.0:
             logger.warning(
                 "Paper BUY skipped for %s: insufficient USDT balance.", symbol
@@ -209,7 +250,8 @@ def paper_execute(symbol: str, side: str, price: float):
             return None
 
         existing = portfolio["holdings"][base]
-        amount = existing["amount"] * cfg.TRADE_AMOUNT_FRACTION
+        sell_fraction = getattr(cfg, "SELL_AMOUNT_FRACTION", 0.50)
+        amount = existing["amount"] * sell_fraction
         if amount <= 0:
             return None
 

@@ -193,3 +193,63 @@ def send_alerts(results) -> None:
         send_telegram(results)
     if mode == "none":
         logger.info("Alert mode is 'none'. No alerts sent.")
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat alert
+# ---------------------------------------------------------------------------
+
+def send_heartbeat_alert(summary_lines: list) -> None:
+    """Send a 'bot is alive' heartbeat with a plain-text summary.
+    Uses whatever channel(s) are configured in ALERT_MODE."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    text = "\n".join(
+        [f"🤖 Crypto Bot Heartbeat — {now}", "=" * 42, ""]
+        + summary_lines
+        + ["", "— Crypto Signal Bot"]
+    )
+    mode = cfg.ALERT_MODE.lower()
+
+    # Email
+    if mode in ("email", "both"):
+        if cfg.EMAIL_SENDER and "your_gmail" not in cfg.EMAIL_SENDER:
+            subject = f"[Crypto Bot] ✅ Heartbeat — {now[:16]}"
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = cfg.EMAIL_SENDER
+            msg["To"] = ", ".join(cfg.EMAIL_RECIPIENTS)
+            html = f"<html><body><pre>{text}</pre></body></html>"
+            msg.attach(MIMEText(text, "plain"))
+            msg.attach(MIMEText(html, "html"))
+            try:
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                    server.login(cfg.EMAIL_SENDER, cfg.EMAIL_PASSWORD)
+                    server.sendmail(
+                        cfg.EMAIL_SENDER, cfg.EMAIL_RECIPIENTS, msg.as_string()
+                    )
+                logger.info("Heartbeat email sent.")
+            except Exception as exc:
+                logger.error("Heartbeat email failed: %s", exc)
+
+    # Telegram
+    if mode in ("telegram", "both"):
+        if cfg.TELEGRAM_BOT_TOKEN and cfg.TELEGRAM_CHAT_ID:
+            url = (
+                f"https://api.telegram.org/bot"
+                f"{cfg.TELEGRAM_BOT_TOKEN}/sendMessage"
+            )
+            import urllib.parse
+            data = urllib.parse.urlencode(
+                {"chat_id": cfg.TELEGRAM_CHAT_ID, "text": text}
+            ).encode()
+            try:
+                import urllib.request
+                urllib.request.urlopen(
+                    urllib.request.Request(url, data=data), timeout=10
+                )
+                logger.info("Heartbeat Telegram message sent.")
+            except Exception as exc:
+                logger.error("Heartbeat Telegram failed: %s", exc)
+
+    if mode == "none":
+        logger.info("Heartbeat (no alert): %s", " | ".join(summary_lines))

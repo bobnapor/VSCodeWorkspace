@@ -5,6 +5,12 @@
 # NEVER commit this file to a public repo with real keys in it.
 # =============================================================================
 
+import os as _os
+
+# Absolute path to this file's directory — ensures log/portfolio files are
+# always written to the project folder, regardless of where the .bat is run.
+BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
+
 # --------------- PAPER TRADING MODE ---------------
 # True  = no exchange account needed; uses TradingView (via tvdatafeed)
 #         for real OHLCV data and simulates trades in paper_portfolio.json
@@ -33,7 +39,7 @@ TV_SYMBOL_MAP = {
 PAPER_STARTING_BALANCE = 10000.0
 
 # File to persist paper portfolio between runs
-PAPER_PORTFOLIO_FILE = "paper_portfolio.json"
+PAPER_PORTFOLIO_FILE = _os.path.join(BASE_DIR, "paper_portfolio.json")
 
 # --------------- TRADING SYMBOLS TO WATCH ---------------
 # Use CCXT format: 'BASE/QUOTE'  e.g. 'BTC/USDT', 'ETH/USDT', 'SOL/USDT'
@@ -77,6 +83,49 @@ EMA_LONG = 21
 VOLUME_SPIKE_MULTIPLIER = 2.0
 VOLUME_SPIKE_WINDOW = 20  # rolling window (candles) for average volume
 
+# EMA crossover confirmation — crossover must hold for N consecutive candles.
+# 1 = fire on the first crossover candle, 2+ = reduces noise on short TFs.
+EMA_CROSSOVER_CONFIRM_CANDLES = 2
+
+# RSI zone entry — also fire BUY/SELL if RSI is *already* in the extreme zone
+# when the bot starts/restarts (not just on the exact crossover candle).
+RSI_ENTER_ON_ZONE = True
+
+# --------------- TREND FILTER ---------------
+# Only take BUY signals when price is above the higher-TF EMA (uptrend).
+# Only take SELL signals when price is below it (downtrend).
+# Prevents trading counter-trend, the biggest source of avoidable losses.
+TREND_FILTER_ENABLED = True
+TREND_TIMEFRAME = "4h"   # higher timeframe to evaluate trend on
+TREND_EMA_PERIOD = 50    # EMA period on that higher timeframe
+
+# --------------- ATR POSITION SIZING ---------------
+# Scale position size inversely with volatility: less risk when price is
+# moving fast, more when it's quiet.
+ATR_SIZING_ENABLED = True
+ATR_PERIOD = 14
+ATR_RISK_PCT = 0.01     # risk this fraction of portfolio per ATR unit
+MAX_TRADE_PCT = 0.10    # hard cap: never spend more than 10% per trade
+
+# --------------- SIGNAL COOLDOWN ---------------
+# After a signal fires, ignore the same direction for N minutes.
+# Prevents pile-driving into a position on repeated signals.
+SIGNAL_COOLDOWN_MINUTES = 45   # 3 × 15m candles
+
+# --------------- POSITION LIMITS ---------------
+# Never allocate more than this fraction of total portfolio to one asset.
+MAX_POSITION_ALLOCATION = 0.20  # 20% max per asset
+
+# --------------- TRADE DEDUPLICATION ---------------
+# Don't re-execute the same symbol+side within this window (guards against
+# double-execution if the scheduler fires twice after a restart).
+TRADE_DEDUP_MINUTES = 15
+
+# --------------- HEARTBEAT ---------------
+# Periodically email/message a "bot is alive" summary.
+HEARTBEAT_ENABLED = True
+HEARTBEAT_HOURS = 24
+
 # Minimum number of signals that must agree before alerting/trading
 # 1 = fire on any single signal, 3 = require 3 signals to agree (more conservative)
 MIN_SIGNALS_TO_ACT = 2
@@ -113,6 +162,10 @@ ORDER_TYPE = "market"
 # 0.05 = 5% of available USDT balance per trade
 TRADE_AMOUNT_FRACTION = 0.05
 
+# Fraction of holdings to sell per SELL signal.
+# 0.50 = exit half the position (decisive). 1.0 = full exit.
+SELL_AMOUNT_FRACTION = 0.50
+
 # Stop-loss percentage below entry price (e.g. 0.03 = 3% stop-loss)
 STOP_LOSS_PCT = 0.03
 
@@ -124,5 +177,5 @@ TAKE_PROFIT_PCT = 0.06
 CHECK_INTERVAL_MINUTES = 15  # should align with TIMEFRAME (e.g. 15 for '15m')
 
 # --------------- LOGGING ---------------
-LOG_FILE = "crypto_bot.log"
+LOG_FILE = _os.path.join(BASE_DIR, "crypto_bot.log")
 LOG_LEVEL = "INFO"   # DEBUG, INFO, WARNING, ERROR

@@ -1,11 +1,10 @@
 # =============================================================================
 # crypto_signals.py — Signal Engine
-# Computes RSI, MACD, EMA crossover, and volume spike signals from OHLCV data.
-# Supports both live exchange mode (ccxt) and paper mode (CoinGecko public API).
+# Computes RSI, MACD, EMA crossover, volume spike, and ATR from OHLCV data.
+# Supports live exchange mode (ccxt) and paper mode (TradingView).
 # =============================================================================
 
 import logging
-from typing import Optional, Tuple
 import pandas as pd
 import numpy as np
 import ccxt
@@ -80,6 +79,18 @@ def calc_ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
 
+def calc_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Average True Range — measures per-candle volatility."""
+    high = df["high"]
+    low = df["low"]
+    prev_close = df["close"].shift(1)
+    tr = pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
+        axis=1,
+    ).max(axis=1)
+    return tr.ewm(span=period, adjust=False).mean()
+
+
 # ---------------------------------------------------------------------------
 # Individual signal checkers  (return 'BUY', 'SELL', or None)
 # ---------------------------------------------------------------------------
@@ -90,10 +101,19 @@ def signal_rsi(df: pd.DataFrame):
     prev = rsi.iloc[-2]
     logger.debug("RSI last=%.2f prev=%.2f", last, prev)
 
+    # Primary: crossover — RSI just entered the extreme zone this candle
     if prev >= cfg.RSI_OVERSOLD and last < cfg.RSI_OVERSOLD:
-        return "BUY"   # crossed down into oversold
+        return "BUY"
     if prev <= cfg.RSI_OVERBOUGHT and last > cfg.RSI_OVERBOUGHT:
-        return "SELL"  # crossed up into overbought
+        return "SELL"
+
+    # Secondary: already in zone (catches signals after a restart/gap)
+    if getattr(cfg, "RSI_ENTER_ON_ZONE", True):
+        if last < cfg.RSI_OVERSOLD:
+            return "BUY"
+        if last > cfg.RSI_OVERBOUGHT:
+            return "SELL"
+
     return None
 
 
@@ -113,12 +133,23 @@ def signal_macd(df: pd.DataFrame):
 def signal_ema_crossover(df: pd.DataFrame):
     short = calc_ema(df["close"], cfg.EMA_SHORT)
     long_ = calc_ema(df["close"], cfg.EMA_LONG)
-    # Golden cross: short EMA crosses above long EMA
-    if short.iloc[-2] <= long_.iloc[-2] and short.iloc[-1] > long_.iloc[-1]:
-        return "BUY"
-    # Death cross: short EMA crosses below long EMA
-    if short.iloc[-2] >= long_.iloc[-2] and short.iloc[-1] < long_.iloc[-1]:
-        return "SELL"
+    n = max(1, getattr(cfg, "EMA_CROSSOVER_CONFIRM_CANDLES", 2))
+
+    # Require crossover to hold for n consecutive candles before firing.
+    # This eliminates most noise-driven false crossovers on short timeframes.
+    try:
+        bull_now = all(
+            short.iloc[-(i + 1)] > long_.iloc[-(i + 1)] for i in range(n)
+        )
+        if bull_now and short.iloc[-(n + 1)] <= long_.iloc[-(n + 1)]:
+            return "BUY"
+        bear_now = all(
+            short.iloc[-(i + 1)] < long_.iloc[-(i + 1)] for i in range(n)
+        )
+        if bear_now and short.iloc[-(n + 1)] >= long_.iloc[-(n + 1)]:
+            return "SELL"
+    except IndexError:
+        pass  # not enough data for confirmation window
     return None
 
 
@@ -156,17 +187,30 @@ class SignalResult:
     def __init__(self, symbol: str, price: float):
         self.symbol = symbol
         self.price = price
-        self.signals = {}  # indicator -> 'BUY' / 'SELL' / None
+        self.signals = {}   # indicator -> 'BUY' / 'SELL' / None
         self.buy_count = 0
         self.sell_count = 0
-        self.consensus = None  # 'BUY', 'SELL', or None
-        # Live indicator snapshots — populated during analysis for display
-        self.rsi_val = None       # float or None
-        self.macd_hist_val = None  # float or None
+        self.consensus = None    # 'BUY', 'SELL', or None
+        # Indicator snapshots populated during analysis (for display + sizing)
+        self.rsi_val = None        # float
+        self.macd_hist_val = None  # float
+        self.atr_val = None        # float — latest ATR in price terms
+        # Trend filter: True=uptrend, False=downtrend, None=filter disabled
+        self.trend_bullish = None
 
     def compute_consensus(self):
-        self.buy_count = sum(1 for v in self.signals.values() if v == "BUY")
-        self.sell_count = sum(1 for v in self.signals.values() if v == "SELL")
+        buys = {k for k, v in self.signals.items() if v == "BUY"}
+        sells = {k for k, v in self.signals.items() if v == "SELL"}
+
+        # Trend filter: suppress signals that go against the macro trend
+        if self.trend_bullish is True:
+            sells = set()   # uptrend — ignore SELL signals
+        elif self.trend_bullish is False:
+            buys = set()    # downtrend — ignore BUY signals
+
+        self.buy_count = len(buys)
+        self.sell_count = len(sells)
+
         if self.buy_count >= cfg.MIN_SIGNALS_TO_ACT:
             self.consensus = "BUY"
         elif self.sell_count >= cfg.MIN_SIGNALS_TO_ACT:
@@ -175,11 +219,20 @@ class SignalResult:
             self.consensus = None
 
     def summary(self) -> str:
+        if self.trend_bullish is True:
+            trend_str = "  Trend (4h)      : ▲ UPTREND  (SELL signals suppressed)"
+        elif self.trend_bullish is False:
+            trend_str = "  Trend (4h)      : ▼ DOWNTREND (BUY signals suppressed)"
+        else:
+            trend_str = None
+
         lines = [
             f"=== {self.symbol} @ ${self.price:,.4f} ===",
             f"  Consensus: {self.consensus or 'NO SIGNAL'} "
             f"(BUY={self.buy_count}, SELL={self.sell_count})",
         ]
+        if trend_str:
+            lines.append(trend_str)
         for name, sig in self.signals.items():
             lines.append(f"  {name:20s}: {sig or '—'}")
         return "\n".join(lines)
@@ -199,7 +252,7 @@ def analyze_symbol(exchange: ccxt.Exchange, symbol: str) -> SignalResult:
             logger.warning("Signal %s failed for %s: %s", name, symbol, exc)
             result.signals[name] = None
 
-    # Cache indicator snapshots for display
+    # Cache indicator snapshots for display / position sizing
     try:
         result.rsi_val = float(calc_rsi(df["close"]).iloc[-1])
     except Exception:
@@ -207,6 +260,12 @@ def analyze_symbol(exchange: ccxt.Exchange, symbol: str) -> SignalResult:
     try:
         _, _, hist = calc_macd(df["close"])
         result.macd_hist_val = float(hist.iloc[-1])
+    except Exception:
+        pass
+    try:
+        result.atr_val = float(
+            calc_atr(df, getattr(cfg, "ATR_PERIOD", 14)).iloc[-1]
+        )
     except Exception:
         pass
 
@@ -227,7 +286,7 @@ def run_all_signals(exchange: ccxt.Exchange):
 
 
 # ---------------------------------------------------------------------------
-# Paper mode: CoinGecko-backed signal runner (no exchange needed)
+# Paper mode: TradingView-backed signal runner (no exchange account needed)
 # ---------------------------------------------------------------------------
 
 def analyze_symbol_paper(symbol: str) -> SignalResult:
@@ -247,7 +306,7 @@ def analyze_symbol_paper(symbol: str) -> SignalResult:
             )
             result.signals[name] = None
 
-    # Cache indicator snapshots for display
+    # Cache indicator snapshots for display / position sizing
     try:
         result.rsi_val = float(calc_rsi(df["close"]).iloc[-1])
     except Exception:
@@ -257,6 +316,32 @@ def analyze_symbol_paper(symbol: str) -> SignalResult:
         result.macd_hist_val = float(hist.iloc[-1])
     except Exception:
         pass
+    try:
+        result.atr_val = float(
+            calc_atr(df, getattr(cfg, "ATR_PERIOD", 14)).iloc[-1]
+        )
+    except Exception:
+        pass
+
+    # Higher-timeframe trend filter
+    if getattr(cfg, "TREND_FILTER_ENABLED", False):
+        try:
+            trend_df = fetch_ohlcv_tradingview(
+                symbol, timeframe_override=cfg.TREND_TIMEFRAME
+            )
+            trend_ema = calc_ema(trend_df["close"], cfg.TREND_EMA_PERIOD)
+            last_close = float(trend_df["close"].iloc[-1])
+            ema_val = float(trend_ema.iloc[-1])
+            result.trend_bullish = last_close > ema_val
+            logger.debug(
+                "%s trend (%s EMA%d): %s  close=%.4f  ema=%.4f",
+                symbol, cfg.TREND_TIMEFRAME, cfg.TREND_EMA_PERIOD,
+                "BULL" if result.trend_bullish else "BEAR",
+                last_close, ema_val,
+            )
+        except Exception as exc:
+            logger.warning("Trend filter failed for %s: %s", symbol, exc)
+            result.trend_bullish = None
 
     result.compute_consensus()
     logger.info(result.summary())
@@ -264,7 +349,7 @@ def analyze_symbol_paper(symbol: str) -> SignalResult:
 
 
 def run_all_signals_paper():
-    """Analyze every configured symbol using CoinGecko (no exchange needed)."""
+    """Analyze every configured symbol using TradingView (no exchange needed)."""
     results = []
     for symbol in cfg.SYMBOLS:
         try:
