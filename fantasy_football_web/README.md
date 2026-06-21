@@ -16,7 +16,7 @@ A Flask + SQLite starter app for storing and exploring fantasy football league h
 ## Run locally
 
 ```bash
-cd /home/runner/work/VSCodeWorkspace/VSCodeWorkspace/fantasy_football_web
+cd fantasy_football_web
 pip install -r requirements.txt
 python app.py
 ```
