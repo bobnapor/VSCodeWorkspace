@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Trades</p>
+    <h2 class="mt-2 text-3xl font-bold">League trade log</h2>
+  </div>
+  <form method="get" class="panel flex flex-wrap items-end gap-4">
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">Season</span>
+      <select name="year" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+        <option value="">All</option>
+        {% for year in years %}<option value="{{ year }}" {{ 'selected' if year == selected_year else '' }}>{{ year }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">Owner</span>
+      <select name="owner" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+        <option value="">All</option>
+        {% for owner in manager_names %}<option value="{{ owner }}" {{ 'selected' if owner == selected_owner else '' }}>{{ owner }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950" type="submit">Filter</button>
+  </form>
+  <div class="space-y-4">
+    {% for trade in trade_rows %}
+      <div class="panel">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">{{ trade.season.year }}{% if trade.week %} • Week {{ trade.week }}{% endif %}</p>
+            <p class="mt-1 text-lg font-semibold">{{ trade.notes or 'Trade' }}</p>
+          </div>
+        </div>
+        <div class="mt-4 grid gap-3 md:grid-cols-2">
+          {% for asset in trade.assets %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3">
+              <p class="text-sm text-slate-300">{{ asset.from_manager.name }} ➜ {{ asset.to_manager.name }}</p>
+              <p class="mt-1 font-medium">{{ asset.asset_name }}</p>
+              <p class="mt-1 text-xs uppercase tracking-[0.25em] text-cyan-400">{{ asset.asset_type }}</p>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% else %}
+      <div class="panel">No trades match the current filter.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

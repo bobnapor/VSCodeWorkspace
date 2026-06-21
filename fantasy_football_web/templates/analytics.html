@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Analytics</p>
+    <h2 class="mt-2 text-3xl font-bold">Explore league trends</h2>
+  </div>
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="panel"><canvas id="winPctChart" height="240"></canvas></div>
+    <div class="panel"><canvas id="winningSeasonsChart" height="240"></canvas></div>
+    <div class="panel xl:col-span-2"><canvas id="pointsTrendChart" height="120"></canvas></div>
+  </div>
+  <div class="panel overflow-x-auto">
+    <h3 class="mb-4 text-xl font-semibold">Head-to-head win matrix</h3>
+    <table id="h2h-matrix" class="w-full text-center text-sm"></table>
+  </div>
+</div>
+<script>
+async function loadAnalytics() {
+  const winData = await fetch('{{ url_for('api_win_pct') }}').then(r => r.json());
+  new Chart(document.getElementById('winPctChart'), {
+    type: 'bar',
+    data: { labels: winData.labels, datasets: [{ label: 'Career win %', data: winData.values, backgroundColor: '#06b6d4' }] },
+    options: { scales: { y: { beginAtZero: true, max: 100 } } }
+  });
+  new Chart(document.getElementById('winningSeasonsChart'), {
+    type: 'bar',
+    data: { labels: winData.labels, datasets: [{ label: 'Winning seasons', data: winData.winning_seasons, backgroundColor: '#a855f7' }] },
+    options: { scales: { y: { beginAtZero: true } } }
+  });
+
+  const pointData = await fetch('{{ url_for('api_points_by_season') }}').then(r => r.json());
+  const colors = ['#22d3ee', '#818cf8', '#fb7185', '#34d399', '#f59e0b', '#f472b6', '#e879f9', '#facc15', '#60a5fa', '#c084fc'];
+  const datasets = Object.entries(pointData.series).map(([name, values], index) => ({
+    label: name,
+    data: values.map(v => v.ppg),
+    borderColor: colors[index % colors.length],
+    backgroundColor: colors[index % colors.length],
+    tension: 0.25
+  }));
+  new Chart(document.getElementById('pointsTrendChart'), {
+    type: 'line',
+    data: { labels: pointData.years, datasets },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+
+  const matrixData = await fetch('{{ url_for('api_head_to_head_matrix') }}').then(r => r.json());
+  const table = document.getElementById('h2h-matrix');
+  table.innerHTML = '';
+  const head = document.createElement('thead');
+  head.innerHTML = `<tr><th class="p-2 text-left">Owner</th>${matrixData.owners.map(o => `<th class="p-2">${o}</th>`).join('')}</tr>`;
+  table.appendChild(head);
+  const body = document.createElement('tbody');
+  matrixData.owners.forEach((owner, rowIndex) => {
+    const row = document.createElement('tr');
+    row.innerHTML = `<td class="border-t border-slate-800 p-2 text-left font-medium">${owner}</td>` + matrixData.matrix[rowIndex].map(value => {
+      if (value === null) return '<td class="border-t border-slate-800 p-2 text-slate-600">—</td>';
+      const pct = Math.round(value * 100);
+      return `<td class="border-t border-slate-800 p-2 ${pct >= 50 ? 'text-emerald-300' : 'text-rose-300'}">${pct}%</td>`;
+    }).join('');
+    body.appendChild(row);
+  });
+  table.appendChild(body);
+}
+loadAnalytics();
+</script>
+{% endblock %}

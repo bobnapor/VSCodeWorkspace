@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-8">
+  <section>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Dashboard</p>
+    <h2 class="mt-2 text-4xl font-bold">Your league history, organized.</h2>
+    <p class="mt-3 max-w-3xl text-slate-400">This starter app stores season summaries, trades, and synthetic matchup data so your friends can explore the league without touching the spreadsheet.</p>
+  </section>
+
+  <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div class="stat-card"><span>Seasons</span><strong>{{ overview.seasons }}</strong></div>
+    <div class="stat-card"><span>Managers</span><strong>{{ overview.managers }}</strong></div>
+    <div class="stat-card"><span>Trades Logged</span><strong>{{ overview.trades }}</strong></div>
+    <div class="stat-card"><span>Matchups Stored</span><strong>{{ overview.matchups }}</strong></div>
+  </section>
+
+  <section class="grid gap-6 xl:grid-cols-[1.25fr_1fr]">
+    <div class="panel">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="text-xl font-semibold">All-Time Standings</h3>
+        <a class="text-sm text-cyan-400 hover:text-cyan-300" href="{{ url_for('records') }}">Full records</a>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="text-slate-400">
+            <tr><th>#</th><th>Owner</th><th>W-L</th><th>Win%</th><th>Titles</th><th>Median Rank</th></tr>
+          </thead>
+          <tbody>
+            {% for row in summaries %}
+              <tr class="border-t border-slate-800">
+                <td class="py-3">{{ loop.index }}</td>
+                <td class="py-3 font-medium">{{ row.manager }}</td>
+                <td class="py-3">{{ row.wins }}-{{ row.losses }}</td>
+                <td class="py-3">{{ '%.1f'|format(row.win_pct * 100) }}%</td>
+                <td class="py-3">{{ row.championships }}</td>
+                <td class="py-3">{{ row.median_rank }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 class="text-xl font-semibold">Recent Champions</h3>
+      <div class="mt-4 space-y-3">
+        {% for champion in champions %}
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3">
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">{{ champion.year }}</p>
+            <p class="mt-1 text-lg font-semibold">{{ champion.name }}</p>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

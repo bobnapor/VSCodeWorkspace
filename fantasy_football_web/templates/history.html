@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Season history</p>
+    <h2 class="mt-2 text-3xl font-bold">Every season at a glance</h2>
+  </div>
+  <form method="get" class="panel flex flex-wrap items-end gap-4">
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">Season</span>
+      <select name="year" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+        {% for year in years %}
+          <option value="{{ year }}" {{ 'selected' if year == selected_year else '' }}>{{ year }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950" type="submit">View season</button>
+  </form>
+  <div class="panel overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead class="text-slate-400">
+        <tr>
+          <th>Rank</th><th>Owner</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PF/G</th><th>PA/G</th><th>Diff/G</th><th>Moves</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr class="border-t border-slate-800">
+            <td class="py-3">{{ row.rank }}</td>
+            <td class="py-3 font-medium">{{ row.manager.name }}</td>
+            <td class="py-3">{{ row.team_name }}</td>
+            <td class="py-3">{{ row.wins }}</td>
+            <td class="py-3">{{ row.losses }}</td>
+            <td class="py-3">{{ row.points_for|round(1) }}</td>
+            <td class="py-3">{{ row.points_against|round(1) }}</td>
+            <td class="py-3">{{ row.ppg }}</td>
+            <td class="py-3">{{ row.papg }}</td>
+            <td class="py-3 {{ 'text-emerald-300' if row.diff_pg > 0 else 'text-rose-300' }}">{{ row.diff_pg }}</td>
+            <td class="py-3">{{ row.moves }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
