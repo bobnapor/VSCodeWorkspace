@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">All-time records</p>
+    <h2 class="mt-2 text-3xl font-bold">Career leaderboards</h2>
+  </div>
+  <section class="panel overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead class="text-slate-400">
+        <tr><th>Owner</th><th>Wins</th><th>Losses</th><th>Win%</th><th>Titles</th><th>Winning Seasons</th><th>PPG</th><th>PA/G</th><th>Avg Moves</th></tr>
+      </thead>
+      <tbody>
+        {% for row in summaries %}
+          <tr class="border-t border-slate-800">
+            <td class="py-3 font-medium">{{ row.manager }}</td>
+            <td class="py-3">{{ row.wins }}</td>
+            <td class="py-3">{{ row.losses }}</td>
+            <td class="py-3">{{ '%.1f'|format(row.win_pct * 100) }}%</td>
+            <td class="py-3">{{ row.championships }}</td>
+            <td class="py-3">{{ row.winning_seasons }}</td>
+            <td class="py-3">{{ row.ppg }}</td>
+            <td class="py-3">{{ row.papg }}</td>
+            <td class="py-3">{{ row.avg_moves }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="grid gap-6 xl:grid-cols-2">
+    <div class="panel overflow-x-auto">
+      <h3 class="mb-4 text-xl font-semibold">Highest season points</h3>
+      <table class="w-full text-sm">
+        <thead class="text-slate-400"><tr><th>Year</th><th>Owner</th><th>Team</th><th>PF</th><th>PF/G</th></tr></thead>
+        <tbody>
+          {% for row in best_ppg %}
+            <tr class="border-t border-slate-800"><td class="py-3">{{ row.season.year }}</td><td>{{ row.manager.name }}</td><td>{{ row.team_name }}</td><td>{{ row.points_for|round(1) }}</td><td>{{ row.ppg }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="panel overflow-x-auto">
+      <h3 class="mb-4 text-xl font-semibold">Most active seasons</h3>
+      <table class="w-full text-sm">
+        <thead class="text-slate-400"><tr><th>Year</th><th>Owner</th><th>Team</th><th>Moves</th><th>Win%</th></tr></thead>
+        <tbody>
+          {% for row in most_moves %}
+            <tr class="border-t border-slate-800"><td class="py-3">{{ row.season.year }}</td><td>{{ row.manager.name }}</td><td>{{ row.team_name }}</td><td>{{ row.moves }}</td><td>{{ '%.1f'|format(row.win_pct * 100) }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

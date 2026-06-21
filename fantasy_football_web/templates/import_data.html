@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Import</p>
+    <h2 class="mt-2 text-3xl font-bold">Bring in data from Google Sheets</h2>
+    <p class="mt-3 max-w-3xl text-slate-400">Export a tab as CSV, paste it here, and the app will upsert season summaries or trade assets.</p>
+  </div>
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="panel">
+      <h3 class="text-xl font-semibold">Expected team summary CSV columns</h3>
+      <pre class="mt-4 overflow-x-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-300">year,owner,team,wins,losses,ties,pf,pa,rank,final_place,made_playoffs,moves</pre>
+    </div>
+    <div class="panel">
+      <h3 class="text-xl font-semibold">Expected trade CSV columns</h3>
+      <pre class="mt-4 overflow-x-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-300">year,week,from_owner,to_owner,asset_name,asset_type,notes</pre>
+    </div>
+  </div>
+  <form method="post" class="panel flex flex-col gap-4">
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">Dataset</span>
+      <select name="dataset" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+        <option value="team_summary">Team summary history</option>
+        <option value="trades">Trades</option>
+      </select>
+    </label>
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">CSV text</span>
+      <textarea name="csv_text" rows="18" class="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm" placeholder="Paste CSV exported from Google Sheets here"></textarea>
+    </label>
+    <div>
+      <button class="rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950" type="submit">Import data</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

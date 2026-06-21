@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="text-sm uppercase tracking-[0.3em] text-cyan-400">Head to head</p>
+    <h2 class="mt-2 text-3xl font-bold">Compare two owners</h2>
+  </div>
+  <form method="get" class="panel grid gap-4 md:grid-cols-3">
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">Owner 1</span>
+      <select name="manager1" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+        {% for owner in manager_names %}<option value="{{ owner }}" {{ 'selected' if owner == manager1 else '' }}>{{ owner }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="flex flex-col gap-2 text-sm">
+      <span class="text-slate-400">Owner 2</span>
+      <select name="manager2" class="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2">
+        {% for owner in manager_names %}<option value="{{ owner }}" {{ 'selected' if owner == manager2 else '' }}>{{ owner }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="mt-auto rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950" type="submit">Compare</button>
+  </form>
+  {% if summary %}
+    <div class="grid gap-4 md:grid-cols-4">
+      <div class="stat-card"><span>{{ summary.manager1 }} wins</span><strong>{{ summary.manager1_wins }}</strong></div>
+      <div class="stat-card"><span>{{ summary.manager2 }} wins</span><strong>{{ summary.manager2_wins }}</strong></div>
+      <div class="stat-card"><span>{{ summary.manager1 }} win %</span><strong>{{ '%.1f'|format(summary.win_pct * 100) }}%</strong></div>
+      <div class="stat-card"><span>Avg score</span><strong>{{ summary.avg_score_for }}</strong></div>
+    </div>
+    <div class="panel overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead class="text-slate-400"><tr><th>Year</th><th>Week</th><th>{{ summary.manager1 }}</th><th>{{ summary.manager2 }}</th><th>Winner</th><th>Type</th></tr></thead>
+        <tbody>
+          {% for game in games %}
+            <tr class="border-t border-slate-800">
+              <td class="py-3">{{ game.year }}</td><td>{{ game.week }}</td><td>{{ game.manager1_score }}</td><td>{{ game.manager2_score }}</td><td>{{ game.winner }}</td><td>{{ 'Playoff' if game.is_playoff else 'Regular' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="panel">Pick two different managers.</div>
+  {% endif %}
+</div>
+{% endblock %}
