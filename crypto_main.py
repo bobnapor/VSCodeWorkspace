@@ -11,6 +11,7 @@
 #   4. Repeat every crypto_config.CHECK_INTERVAL_MINUTES minutes.
 # =============================================================================
 
+import json
 import logging
 import os
 import sys
@@ -39,6 +40,9 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+# Cache the config-file value so runtime overrides can revert cleanly
+_ORIG_TREND_FILTER = getattr(cfg, "TREND_FILTER_ENABLED", True)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +140,38 @@ def _validate_config() -> list:
             issues.append("EXCHANGE_API_KEY not set — live trading will fail")
         if not cfg.EXCHANGE_API_SECRET:
             issues.append("EXCHANGE_API_SECRET not set — live trading will fail")
+    else:
+        has_tv_auth = (
+            (cfg.TV_USERNAME and cfg.TV_PASSWORD)
+            or getattr(cfg, "TV_SESSION_TOKEN", "")
+        )
+        if not has_tv_auth:
+            issues.append(
+                "No TradingView credentials set. Data may be unreliable. "
+                "Set TV_USERNAME+TV_PASSWORD or TV_SESSION_TOKEN."
+            )
     return issues
+
+
+def _read_overrides():
+    """
+    Load bot_overrides.json and return its contents as a dict.
+    Written by the dashboard; read at the start of every run_job() cycle.
+    Supported keys: 'paused' (bool), 'trend_filter_enabled' (bool).
+    Returns an empty dict if the file doesn't exist or is malformed.
+    """
+    import pathlib
+    path_str = getattr(cfg, "BOT_OVERRIDES_FILE", "")
+    if not path_str:
+        return {}
+    path = pathlib.Path(path_str)
+    if not path.exists():
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 def _get_indicator_val(result, indicator_name: str) -> str:
@@ -149,6 +184,69 @@ def _get_indicator_val(result, indicator_name: str) -> str:
     except Exception:
         pass
     return "—"
+
+
+def _build_trade_reasons(result, funding_data=None, oi_data=None):
+    """
+    Build a structured dict explaining WHY a trade is being executed.
+    Stored in the trade log so the dashboard and alerts can display it.
+    """
+    _sig_labels = {
+        "RSI": {
+            "BUY":  "RSI oversold ({:.1f})".format(result.rsi_val) if result.rsi_val else "RSI oversold",
+            "SELL": "RSI overbought ({:.1f})".format(result.rsi_val) if result.rsi_val else "RSI overbought",
+        },
+        "MACD": {
+            "BUY":  "MACD bullish cross (hist {:+.4f})".format(result.macd_hist_val) if result.macd_hist_val else "MACD bullish",
+            "SELL": "MACD bearish cross (hist {:+.4f})".format(result.macd_hist_val) if result.macd_hist_val else "MACD bearish",
+        },
+        "EMA Crossover": {
+            "BUY":  "EMA-{} crossed above EMA-{}".format(cfg.EMA_SHORT, cfg.EMA_LONG),
+            "SELL": "EMA-{} crossed below EMA-{}".format(cfg.EMA_SHORT, cfg.EMA_LONG),
+        },
+        "Volume Spike": {
+            "BUY":  "Volume spike on up candle ({}x avg)".format(cfg.VOLUME_SPIKE_MULTIPLIER),
+            "SELL": "Volume spike on down candle ({}x avg)".format(cfg.VOLUME_SPIKE_MULTIPLIER),
+        },
+    }
+    buy_sigs  = []
+    sell_sigs = []
+    for name, val in result.signals.items():
+        if val == "BUY":
+            buy_sigs.append(_sig_labels.get(name, {}).get("BUY", name + " BUY"))
+        elif val == "SELL":
+            sell_sigs.append(_sig_labels.get(name, {}).get("SELL", name + " SELL"))
+
+    if getattr(cfg, "TREND_FILTER_ENABLED", False) and result.trend_bullish is not None:
+        trend = "Uptrend (above {}-EMA on {})".format(
+            cfg.TREND_EMA_PERIOD, cfg.TREND_TIMEFRAME
+        ) if result.trend_bullish else "Downtrend (below {}-EMA on {})".format(
+            cfg.TREND_EMA_PERIOD, cfg.TREND_TIMEFRAME
+        )
+    else:
+        trend = "Trend filter disabled"
+
+    reasons = {
+        "buy_signals":  buy_sigs,
+        "sell_signals": sell_sigs,
+        "trend":        trend,
+        "count":        "{} buy / {} sell signals (min {})".format(
+            result.buy_count, result.sell_count, cfg.MIN_SIGNALS_TO_ACT
+        ),
+    }
+    if result.atr_val and result.price:
+        reasons["atr"] = "ATR {:.4f} ({:.2f}% volatility)".format(
+            result.atr_val, result.atr_val / result.price * 100
+        )
+    if funding_data and result.symbol in funding_data:
+        f = funding_data[result.symbol]
+        reasons["funding"] = "{} {} — annualized {}".format(
+            f["rate_pct"], f["signal"], f["rate_ann"]
+        )
+    if oi_data and result.symbol in oi_data:
+        o = oi_data[result.symbol]
+        reasons["oi"] = "{} ({} 4h)".format(o["oi_fmt"], o["change_fmt"])
+    return reasons
 
 
 def send_heartbeat() -> None:
@@ -174,6 +272,19 @@ def send_heartbeat() -> None:
 # ---------------------------------------------------------------------------
 
 def run_job():
+    # --- Runtime overrides (set via the dashboard UI) ---------------------
+    overrides = _read_overrides()
+    if overrides.get("paused", False):
+        logger.info("Bot is PAUSED via dashboard override. Skipping this cycle.")
+        print(_colorize("[PAUSED] Bot paused via dashboard — no signals this cycle.", "yellow"))
+        return
+
+    # Apply trend-filter override; falls back to config file value when key absent
+    cfg.TREND_FILTER_ENABLED = bool(
+        overrides.get("trend_filter_enabled", _ORIG_TREND_FILTER)
+    )
+    # ----------------------------------------------------------------------
+
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("=" * 60)
     logger.info("Running signal check at %s", now_str)
@@ -191,6 +302,35 @@ def run_job():
     except Exception as exc:
         logger.error("Signal analysis failed: %s", exc, exc_info=True)
         return
+
+    # ------------------------------------------------------------------
+    # Optionally enrich results with live funding rates + open interest
+    # ------------------------------------------------------------------
+    funding_data = {}
+    oi_data = {}
+    if getattr(cfg, "OI_FUNDING_SIGNALS_ENABLED", False):
+        try:
+            from crypto_market_data import fetch_funding_rates, fetch_open_interest
+            funding_data = fetch_funding_rates() or {}
+            oi_data      = fetch_open_interest() or {}
+            for r in results:
+                if r.symbol in funding_data:
+                    f = funding_data[r.symbol]
+                    r.funding_rate   = f.get("rate")
+                    r.funding_signal = f.get("signal")
+                if r.symbol in oi_data:
+                    o = oi_data[r.symbol]
+                    r.oi_change_pct = o.get("change_pct")
+                    r.oi_fmt        = o.get("oi_fmt")
+                # Suppress BUY when funding is extreme (crowded longs)
+                if r.consensus == "BUY" and (r.funding_rate or 0) > 0.001:
+                    logger.info(
+                        "Suppressing BUY for %s — extreme funding rate %.4f%%/8h",
+                        r.symbol, r.funding_rate * 100,
+                    )
+                    r.consensus = None
+        except Exception as _exc:
+            logger.warning("Failed to fetch funding/OI data: %s", _exc)
 
     # Print summary to console
     print("\n" + "=" * 60)
@@ -278,7 +418,9 @@ def run_job():
                     continue
 
                 msg = paper_execute(
-                    r.symbol, side, r.price, atr_val=r.atr_val
+                    r.symbol, side, r.price,
+                    atr_val=r.atr_val,
+                    reasons=_build_trade_reasons(r, funding_data, oi_data),
                 )
                 if msg:
                     print(_colorize(msg, "green" if side == "BUY" else "red"))

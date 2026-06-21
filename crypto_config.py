@@ -18,10 +18,18 @@ BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
 PAPER_TRADE = True
 
 # --------------- TRADINGVIEW SETTINGS (paper mode data source) ---------------
-# Your TradingView login — gives access to more symbols and more history.
-# Leave blank to use the unauthenticated feed (limited but functional).
-TV_USERNAME = ""
-TV_PASSWORD = ""
+# Option A — direct username + password (set a password at tradingview.com
+#            even if you normally sign in with Google):
+TV_USERNAME = "bobnapor"
+TV_PASSWORD = "tvBnape2989"
+
+# Option B — session token (for Google/Apple SSO users who don't have a
+#            TradingView password). How to get it:
+#            1. Log into tradingview.com in Chrome/Edge via Google
+#            2. Press F12 → Application → Cookies → tradingview.com
+#            3. Copy the value of the cookie named 'sessionid'
+#            Leave blank if using Option A or no-login mode.
+TV_SESSION_TOKEN = ""
 
 # TradingView symbol map: "BASE/QUOTE" → ("TV_SYMBOL", "TV_EXCHANGE")
 # TV_SYMBOL: the symbol as shown on TradingView (no slash)
@@ -179,3 +187,16 @@ CHECK_INTERVAL_MINUTES = 15  # should align with TIMEFRAME (e.g. 15 for '15m')
 # --------------- LOGGING ---------------
 LOG_FILE = _os.path.join(BASE_DIR, "crypto_bot.log")
 LOG_LEVEL = "INFO"   # DEBUG, INFO, WARNING, ERROR
+
+# Runtime control file — written by the dashboard, read by the bot each cycle.
+# Supported keys: "paused" (bool), "trend_filter_enabled" (bool)
+BOT_OVERRIDES_FILE = _os.path.join(BASE_DIR, "bot_overrides.json")
+
+# --------------- OPEN INTEREST & FUNDING RATE SIGNALS ---------------
+# When True, the bot fetches live funding rates and open interest from
+# Binance Futures / Bybit before each trade decision.
+#   • Extreme positive funding (> 0.1%/8h) suppresses BUY signals
+#     (crowded longs = mean-reversion risk).
+#   • Both metrics appear in the signal summary, trade reasons, and dashboard.
+# Adds ~1-2s per cycle from external HTTP calls (public APIs, no key needed).
+OI_FUNDING_SIGNALS_ENABLED = False

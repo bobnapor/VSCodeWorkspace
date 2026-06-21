@@ -197,6 +197,11 @@ class SignalResult:
         self.atr_val = None        # float — latest ATR in price terms
         # Trend filter: True=uptrend, False=downtrend, None=filter disabled
         self.trend_bullish = None
+        # Funding / OI — populated by crypto_main after signal analysis
+        self.funding_rate   = None   # float (per 8h)
+        self.funding_signal = None   # "BEARISH" / "NEUTRAL" / "BULLISH"
+        self.oi_change_pct  = None   # float (4h change %)
+        self.oi_fmt         = None   # formatted string e.g. "$8.4B"
 
     def compute_consensus(self):
         buys = {k for k, v in self.signals.items() if v == "BUY"}
@@ -235,6 +240,20 @@ class SignalResult:
             lines.append(trend_str)
         for name, sig in self.signals.items():
             lines.append(f"  {name:20s}: {sig or '—'}")
+        if self.funding_signal:
+            lines.append(
+                "  Funding Rate    : {} ({}/8h  ann {})".format(
+                    self.funding_signal,
+                    "{:+.4f}%".format(self.funding_rate * 100) if self.funding_rate is not None else "—",
+                    "~{:+.0f}%/yr".format(self.funding_rate * 100 * 3 * 365) if self.funding_rate is not None else "",
+                )
+            )
+        if self.oi_change_pct is not None:
+            lines.append(
+                "  Open Interest   : {} ({:+.1f}% 4h)".format(
+                    self.oi_fmt or "—", self.oi_change_pct
+                )
+            )
         return "\n".join(lines)
 
 

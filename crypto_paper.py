@@ -45,15 +45,24 @@ def _get_tv():
     """Return a cached TvDatafeed session, creating it if needed."""
     global _tv_session
     if _tv_session is None:
+        token = getattr(cfg, "TV_SESSION_TOKEN", "") or None
         username = cfg.TV_USERNAME or None
         password = cfg.TV_PASSWORD or None
-        if username and password:
+
+        if token:
+            # Option B: Google/Apple SSO users — use browser session cookie
+            logger.info("Connecting to TradingView via session token ...")
+            _tv_session = TvDatafeed(token=token)
+        elif username and password:
+            # Option A: direct username + password
             logger.info("Connecting to TradingView as %s ...", username)
             _tv_session = TvDatafeed(username, password)
         else:
+            # No credentials — unauthenticated (limited but works for major pairs)
             logger.info(
-                "Connecting to TradingView without login "
-                "(limited data — add TV_USERNAME/TV_PASSWORD in config)."
+                "Connecting to TradingView without login. "
+                "Set TV_USERNAME/TV_PASSWORD or TV_SESSION_TOKEN in config "
+                "for more reliable access."
             )
             _tv_session = TvDatafeed()
     return _tv_session
@@ -181,7 +190,7 @@ def get_portfolio_summary(portfolio: dict, current_prices: dict) -> str:
 # Paper trade execution
 # ---------------------------------------------------------------------------
 
-def paper_execute(symbol: str, side: str, price: float, atr_val=None):
+def paper_execute(symbol: str, side: str, price: float, atr_val=None, reasons=None):
     """
     Simulate a BUY or SELL for a symbol at the given price.
     Returns a human-readable trade confirmation string, or None if skipped.
@@ -275,17 +284,74 @@ def paper_execute(symbol: str, side: str, price: float, atr_val=None):
 
     trade_record = {
         "timestamp": now,
-        "symbol": symbol,
-        "side": side,
-        "price": price,
-        "amount": amount,
+        "symbol":    symbol,
+        "side":      side,
+        "price":     price,
+        "amount":    amount,
     }
+    # Attach realised P&L for SELL trades so the dashboard can show it
+    if side == "SELL":
+        trade_record["pnl"] = pnl  # noqa: F821 — pnl set in SELL branch above
+    if reasons:
+        trade_record["reasons"] = reasons
     portfolio["trade_log"].append(trade_record)
     _save_portfolio(portfolio)
     logger.info(msg)
     return msg
 
 
-def get_current_portfolio() -> dict:
+def get_current_portfolio():
     """Public accessor for the current paper portfolio."""
     return _load_portfolio()
+
+
+def reset_paper_portfolio():
+    """
+    Wipe the paper portfolio back to a fresh starting state.
+    The old file is archived with a timestamp suffix before being replaced.
+    Returns a status message string.
+    """
+    path = Path(cfg.PAPER_PORTFOLIO_FILE)
+    archive_name = None
+    if path.exists():
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_path = path.with_name(
+            "paper_portfolio_archive_{}.json".format(stamp)
+        )
+        path.rename(archive_path)
+        archive_name = archive_path.name
+        logger.info("Archived old portfolio to %s", archive_name)
+
+    fresh = {
+        "usdt_balance": cfg.PAPER_STARTING_BALANCE,
+        "holdings": {},
+        "trade_log": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "reset_at": datetime.now(timezone.utc).isoformat(),
+    }
+    tmp_path = path.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
+        json.dump(fresh, f, indent=2)
+    tmp_path.replace(path)
+
+    msg = "Portfolio reset to ${:,.2f} USDT.".format(cfg.PAPER_STARTING_BALANCE)
+    if archive_name:
+        msg += " Previous data archived to {}.".format(archive_name)
+    logger.info(msg)
+    return msg
+
+
+def clear_bot_log():
+    """
+    Truncate the bot log file to a single header line.
+    Returns a status message string.
+    """
+    try:
+        log_path = Path(cfg.LOG_FILE)
+        stamp = datetime.now(timezone.utc).isoformat()
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write("--- Log cleared at {} ---\n".format(stamp))
+        logger.info("Bot log cleared via dashboard.")
+        return "Bot log cleared."
+    except Exception as exc:
+        return "Error clearing log: {}".format(exc)
