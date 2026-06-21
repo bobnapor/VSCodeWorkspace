@@ -29,7 +29,7 @@ Then open http://127.0.0.1:5000
 
 ```csv
 year,owner,team,wins,losses,ties,pf,pa,rank,final_place,made_playoffs,moves
-2023,Fred,Oy Vey JJ,7,7,0,1667,1752,1,1,true,23
+2023,Fred,"Oy Vey, JJ!",7,7,0,1667,1752,1,1,true,23
 ```
 
 ### Trades
