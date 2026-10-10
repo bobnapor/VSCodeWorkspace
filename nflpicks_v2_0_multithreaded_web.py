@@ -1,4 +1,4 @@
-import pandas as pd
+﻿import pandas as pd
 import numpy as np
 from bs4 import BeautifulSoup
 from bs4 import Comment
@@ -47,17 +47,88 @@ def is_numeric_value(value):
         return False
 
 
+
+# Directory where fetched HTML pages are cached locally to avoid re-fetching
+HTML_CACHE_DIR = 'C:/Users/Bobby/Downloads/NFL_Stats_Cache/'
+
+
+_web_blocked = False
+
+
+class WebAccessBlocked(Exception):
+    """Raised when the site refuses automated requests (HTTP 403/429 or a Cloudflare challenge)."""
+
+
+def read_local_html(path):
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        return f.read()
+
+
+def get_html(url, local_path, use_web=True):
+    """Return page HTML from the web (if enabled), falling back to a saved local copy.
+
+    pro-football-reference now blocks scripted requests, so pages saved from a
+    browser into file_dir are used whenever the web fetch fails.
+    """
+    global _web_blocked
+    if use_web and not _web_blocked:
+        try:
+            return fetch_url_with_retry(url)
+        except requests.RequestException as e:
+            logging.warning(f"Web fetch failed for {url} ({e}); trying local file {local_path}")
+        except WebAccessBlocked as e:
+            _web_blocked = True  # stop hitting the site for the remaining pages
+            logging.warning(f"{e}; using local files from {file_dir} for the rest of this run")
+    if not os.path.exists(local_path):
+        raise FileNotFoundError(
+            f"Could not fetch {url} and no local copy exists. "
+            f"Open the page in a browser and save it as: {local_path}"
+        )
+    return read_local_html(local_path)
+
+
 def fetch_url_with_retry(url, max_retries=3, delay=2):
-    """Fetch URL content with retry logic and rate limiting"""
+    """Fetch URL content with retry logic, local file caching, and rate limiting.
+
+    On first fetch, saves HTML to HTML_CACHE_DIR so subsequent runs never
+    need to hit the site again for the same URL.
+    """
+    import hashlib
+    import os
+
+    # Build a stable cache filename from the URL
+    os.makedirs(HTML_CACHE_DIR, exist_ok=True)
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    cache_path = os.path.join(HTML_CACHE_DIR, f"{url_hash}.html")
+
+    # Return cached version if it exists
+    if os.path.exists(cache_path):
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.pro-football-reference.com/',
     }
-    
+
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers, timeout=30)
+            # pro-football-reference sits behind a Cloudflare challenge; retrying won't help
+            if response.status_code in (403, 429) or response.headers.get('cf-mitigated') == 'challenge':
+                raise WebAccessBlocked(f"{response.status_code} blocked by site protection for {url}")
             response.raise_for_status()
-            return response.text
+            html = response.text
+            # Save to cache
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                f.write(html)
+            return html
         except requests.RequestException as e:
             if attempt < max_retries - 1:
                 time.sleep(delay * (attempt + 1))  # Exponential backoff
@@ -203,48 +274,29 @@ def predict_game(home_team, away_team, year, football_data, model):
 
 
 def load_data_for_year(year, off_url, def_url, games_url, use_web=True):
-    """Load data for a year from web URLs or local files"""
+    """Load data for a year from web URLs (falling back to local files) or local files only"""
     year_str = str(year)
 
-    if use_web:
-        # Fetch from web
-        off_html = fetch_url_with_retry(off_url.replace('yyyy', year_str))
-        offense_soup = BeautifulSoup(off_html, 'html.parser')
-        single_year_offense = get_offense_stats(offense_soup, year_str)
+    off_html = get_html(off_url.replace('yyyy', year_str), off_template.replace('yyyy', year_str), use_web)
+    single_year_offense = get_offense_stats(BeautifulSoup(off_html, 'html.parser'), year_str)
 
-        def_html = fetch_url_with_retry(def_url.replace('yyyy', year_str))
-        defense_soup = BeautifulSoup(def_html, 'html.parser')
-        single_year_defense = get_defense_stats(defense_soup, year_str)
+    def_html = get_html(def_url.replace('yyyy', year_str), def_template.replace('yyyy', year_str), use_web)
+    single_year_defense = get_defense_stats(BeautifulSoup(def_html, 'html.parser'), year_str)
 
-        single_year_combined_stats = get_single_year_team_stats(
-            single_year_offense, single_year_defense, year_str
-        )
+    single_year_combined_stats = get_single_year_team_stats(
+        single_year_offense, single_year_defense, year_str
+    )
 
-        games_html = fetch_url_with_retry(games_url.replace('yyyy', year_str))
-        games_soup = BeautifulSoup(games_html, 'html.parser')
-        single_year_games_past, single_year_games_future = get_games(games_soup, year_str)
-    else:
-        # Fallback to local files
-        with open(off_template.replace('yyyy', year_str)) as offense_file:
-            offense_soup = BeautifulSoup(offense_file.read(), 'html.parser')
-            single_year_offense = get_offense_stats(offense_soup, year_str)
-
-        with open(def_template.replace('yyyy', year_str)) as defense_file:
-            defense_soup = BeautifulSoup(defense_file.read(), 'html.parser')
-            single_year_defense = get_defense_stats(defense_soup, year_str)
-
-        single_year_combined_stats = get_single_year_team_stats(
-            single_year_offense, single_year_defense, year_str
-        )
-
-        with open(games_template.replace('yyyy', year_str)) as games_file:
-            games_soup = BeautifulSoup(games_file.read(), 'html.parser')
-            single_year_games_past, single_year_games_future = get_games(games_soup, year_str)
+    games_html = get_html(games_url.replace('yyyy', year_str), games_template.replace('yyyy', year_str), use_web)
+    single_year_games_past, single_year_games_future = get_games(BeautifulSoup(games_html, 'html.parser'), year_str)
 
     return single_year_combined_stats, single_year_games_past, single_year_games_future
 
+PROJECTION_HEADER = "Game|Week|Year|Home|Away|Mean|Median|StdDev|Actual"
+
 
 def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
+    logging.info(PROJECTION_HEADER)
     for game_index in sorted(averaged_predictions.keys()):
         predictions_array = np.array(all_predictions[game_index])
         average_pred = round(averaged_predictions[game_index] / num_runs, 1)
@@ -253,7 +305,7 @@ def get_projection_measures(averaged_predictions, all_predictions, num_runs, gam
 
         if game_index in game_details:
             info = game_details[game_index]
-            logging.info(f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}| Actual: {info['actual_score_difference']}"            )
+            logging.info(f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}|{info['actual_score_difference']}")
         else:
             logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
 
@@ -434,7 +486,7 @@ def run_single_iteration(iteration, cached_data, predict_year, predict_week):
     return iteration_predictions, game_info
 
 
-def main(num_runs, predict_year=2025, predict_week=21, use_web=True):
+def main(num_runs, predict_year=2026, predict_week=4, use_web=True):
     # Setup logging to file - only in main process
     log_filename = f'C:/Users/Bobby/nfl_predictions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
     logging.basicConfig(
@@ -456,7 +508,7 @@ def main(num_runs, predict_year=2025, predict_week=21, use_web=True):
     all_years_team_stats_arr = []
     all_games_arr = []  # Combined past and future games
 
-    for year in range(2019, 2026):
+    for year in range(2020, max(2027, predict_year + 1)):
         logging.info(f"  Loading {year} data...")
         single_year_combined_stats, single_year_games_past, single_year_games_future = load_data_for_year(
             year, off_url, def_url, games_url, use_web=use_web
@@ -467,7 +519,7 @@ def main(num_runs, predict_year=2025, predict_week=21, use_web=True):
         if not single_year_games_future.empty:
             all_games_arr.append(single_year_games_future)
         
-        if use_web:
+        if use_web and not _web_blocked:
             time.sleep(1)  # Rate limiting for web requests
 
     cached_data = {
@@ -523,6 +575,7 @@ def main(num_runs, predict_year=2025, predict_week=21, use_web=True):
 
     # Calculate and log final averages with team names, std dev, and median
     logging.info("\n=== FINAL AVERAGED PREDICTIONS ===")
+    logging.info(PROJECTION_HEADER)
     for game_index in sorted(averaged_predictions.keys()):
         predictions_array = np.array(all_predictions[game_index])
         average_pred = round(averaged_predictions[game_index] / num_runs, 1)
@@ -532,8 +585,7 @@ def main(num_runs, predict_year=2025, predict_week=21, use_web=True):
         if game_index in game_details:
             info = game_details[game_index]
             logging.info(
-                f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}| Actual: {info['actual_score_difference']}"
-            )
+                f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}|{info['actual_score_difference']}"            )
         else:
             logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
 
@@ -542,8 +594,8 @@ def main(num_runs, predict_year=2025, predict_week=21, use_web=True):
 
 if __name__ == "__main__":
     # Configuration
-    PREDICT_YEAR = 2025
-    PREDICT_WEEK = 16
+    PREDICT_YEAR = 2026
+    PREDICT_WEEK = 5
     NUM_RUNS = 10000
     USE_WEB = True  # Set to False to use local HTML files
     

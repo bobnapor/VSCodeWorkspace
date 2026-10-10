@@ -17,6 +17,7 @@ from datetime import datetime
 import time
 
 # Import core functions from the main prediction script
+import nflpicks_v2_0_multithreaded_web as picks_web
 from nflpicks_v2_0_multithreaded_web import (
     load_data_for_year,
     preprocess_data,
@@ -228,7 +229,7 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, 
         if not single_year_games_future.empty:
             all_games_arr.append(single_year_games_future)
         
-        if use_web:
+        if use_web and not picks_web._web_blocked:
             time.sleep(1)  # Rate limiting for web requests
 
     cached_data = {
