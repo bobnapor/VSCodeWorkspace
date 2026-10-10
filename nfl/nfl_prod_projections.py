@@ -494,8 +494,9 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     Returns (output_path, rows_added, actuals_updated, spreads_filled).
     """
-    from openpyxl.styles import PatternFill
+    from openpyxl.styles import Border, PatternFill, Side
 
+    week_outline = Side(style='medium')
     manual_fill = PatternFill(fill_type='solid', start_color=MANUAL_INPUT_FILL_COLOR, end_color=MANUAL_INPUT_FILL_COLOR)
 
     output_dir = output_dir or get_desktop_path()
@@ -604,6 +605,18 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, 13, record['notes'])
         for col in MANUAL_INPUT_COLUMNS:
             ws.cell(r, col).fill = manual_fill
+
+        # Bold outline around each week's block of games, rebuilt every run since rows move
+        week_group = season_order(record)
+        is_first = r == 2 or season_order(records[r - 3]) != week_group
+        is_last = r == len(records) + 1 or season_order(records[r - 1]) != week_group
+        for col in range(1, len(SPREADSHEET_HEADERS) + 1):
+            ws.cell(r, col).border = Border(
+                left=week_outline if col == 1 else None,
+                right=week_outline if col == len(SPREADSHEET_HEADERS) else None,
+                top=week_outline if is_first else None,
+                bottom=week_outline if is_last else None,
+            )
 
     wb.save(output_path)
     return output_path, added, actuals_updated, spreads_filled
