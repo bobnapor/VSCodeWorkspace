@@ -10,6 +10,7 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.utils import resample
 import logging
+import concurrent.futures
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -99,6 +100,7 @@ def get_games(full_games_soup, year_str):
 
             games_list_past.append({
                 'week_number': this_game_week_num,
+                
                 'game_date': game_date,
                 'away_team': away_team,
                 'home_team': home_team,
@@ -203,7 +205,7 @@ def main(num_runs):
         all_games_history_arr = []
         all_games_future_arr = []
 
-        for year in range(2018, 2025):
+        for year in range(2019, 2026):
             #try:
                 single_year_combined_stats, single_year_games_past, single_year_games_future = load_data_for_year(year, off_template, def_template, games_template)
                 all_years_team_stats_arr.append(single_year_combined_stats)
@@ -271,10 +273,10 @@ def main(num_runs):
         logging.info(f"{best_model_name} Prediction intervals (lower bound): {lower_bound[:5]}")
         logging.info(f"{best_model_name} Prediction intervals (upper bound): {upper_bound[:5]}")
 
-        predict_start_year_inc = 2024
-        predict_end_year_exc = 2025
-        predict_start_week_inc = 15
-        predict_end_week_exc = 16#predict_start_week_inc + 1   #change if want to do more than 1 week
+        predict_start_year_inc = 2025
+        predict_end_year_exc = 2026
+        predict_start_week_inc = 10
+        predict_end_week_exc = 11#predict_start_week_inc + 1   #change if want to do more than 1 week
 
         input_games_by_year_and_week = []
         for input_year in range(predict_start_year_inc, predict_end_year_exc):
@@ -319,5 +321,4 @@ def main(num_runs):
         logging.info(f"{game_index}|{average_pred}")
 
 if __name__ == "__main__":
-    main(10000)  #5k took ~10 hours, 10k took ~19 hours
-    
+    main(11)  #5k took ~10 hours, 10k took ~19 hours

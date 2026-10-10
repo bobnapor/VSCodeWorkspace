@@ -12,9 +12,7 @@ from sklearn.utils import resample
 import logging
 import concurrent.futures
 import os
-
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from datetime import datetime
 
 # File directory setup
 file_dir = 'C:/Users/Bobby/Downloads/NFL_Stats/'
@@ -52,7 +50,6 @@ def get_offense_stats(full_offense_soup, year_str):
                 team = single_team_offense.get('team')
                 if team:
                     single_year_offense.append(single_team_offense)
-                    #logging.info(f'Extracted offensive data for the {year_str} {team}')
     return pd.DataFrame(single_year_offense)
 
 
@@ -68,7 +65,6 @@ def get_defense_stats(full_defense_soup, year_str):
         team = single_team_defense.get('def_team')
         if team:
             single_year_defense.append(single_team_defense)
-            #logging.info(f'Extracted defense data for the {year_str} {team}')
     return pd.DataFrame(single_year_defense)
 
 
@@ -197,9 +193,22 @@ def load_data_for_year(year, off_template, def_template, games_template):
     return single_year_combined_stats, single_year_games_past, single_year_games_future
 
 
+def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
+    for game_index in sorted(averaged_predictions.keys()):
+        predictions_array = np.array(all_predictions[game_index])
+        average_pred = round(averaged_predictions[game_index] / num_runs, 1)
+        std_dev = round(np.std(predictions_array), 2)
+        median_pred = round(np.median(predictions_array), 1)
+
+        if game_index in game_details:
+            info = game_details[game_index]
+            logging.info(f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}| Actual: {info['actual_score_difference']}"            )
+        else:
+            logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
+
+
 def run_single_iteration(iteration, off_template, def_template, games_template):
     """Run a single iteration of the simulation"""
-    logging.info(f"Running simulation {iteration + 1}")
     all_years_team_stats_arr = []
     all_games_history_arr = []
     all_games_future_arr = []
@@ -223,8 +232,11 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
     X = merged_data[features]
     y = merged_data['score_difference']
 
-    # Remove random_state to get different splits each iteration
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    # OPTION 1: Bootstrap resample the data for more variation
+    X_resampled, y_resampled = resample(X, y, replace=True, n_samples=len(X))
+    
+    # Random train/test split (no random_state for different splits each iteration)
+    X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2)
 
     # Define the models
     models = {
@@ -259,8 +271,8 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
 
     predict_start_year_inc = 2025
     predict_end_year_exc = 2026
-    predict_start_week_inc = 10
-    predict_end_week_exc = 11
+    predict_start_week_inc = 21
+    predict_end_week_exc = 22
 
     input_games_by_year_and_week = []
     for input_year in range(predict_start_year_inc, predict_end_year_exc):
@@ -282,9 +294,13 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
         actual_score_difference = game['score_difference']
         
         try:
-            projected_score_difference = round(
-                predict_game(home_team, away_team, input_year, multi_year_combined_stats, best_model), 1
-            )
+            # Get base prediction
+            base_prediction = predict_game(home_team, away_team, input_year, multi_year_combined_stats, best_model)
+            
+            # OPTION 2: Add random noise to predictions (normal distribution with std dev of 1.0)
+            noise = np.random.normal(0, 1.0)
+            projected_score_difference = round(base_prediction + noise, 1)
+            
             iteration_predictions[index] = projected_score_difference
             # Store game info for final logging
             game_info[index] = {
@@ -294,16 +310,27 @@ def run_single_iteration(iteration, off_template, def_template, games_template):
                 'year': input_year,
                 'actual_score_difference': actual_score_difference
             }
-            # Log each prediction as it's made
-            logging.info(f"Iteration {iteration + 1} - Game {index}: {away_team} @ {home_team} (Week {input_week}, {input_year}) - Predicted: {projected_score_difference}")
         except ValueError as e:
             logging.error(f"Could not predict score difference for {home_team} vs {away_team}: {e}")
     
-    logging.info(f"Completed simulation {iteration + 1}")
     return iteration_predictions, game_info
 
 
 def main(num_runs):
+    # Setup logging to file - only in main process
+    log_filename = f'C:/Users/Bobby/nfl_predictions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename),
+            logging.StreamHandler()  # Also print to console
+        ],
+        force=True  # Override any existing configuration
+    )
+    
+    logging.info(f"Logging to file: {log_filename}")
+    
     averaged_predictions = {}
     all_predictions = {}  # Store all predictions for each game for std dev and median
     game_details = {}  # Store game details from first iteration
@@ -311,6 +338,7 @@ def main(num_runs):
     # Determine number of worker threads (use CPU count)
     max_workers = min(32, (os.cpu_count() or 1) * 2)
     logging.info(f"Using {max_workers} worker processes")
+    logging.info(f"Running {num_runs} iterations with bootstrap resampling and random noise")
     
     # Use ProcessPoolExecutor for CPU-bound tasks
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -324,6 +352,7 @@ def main(num_runs):
         completed = 0
         for future in concurrent.futures.as_completed(futures):
             iteration = futures[future]
+            completed += 1
             try:
                 iteration_predictions, game_info = future.result()
                 
@@ -339,14 +368,14 @@ def main(num_runs):
                     else:
                         averaged_predictions[game_index] = pred
                         all_predictions[game_index] = [pred]
-                
-                completed += 1
+
                 if completed % 100 == 0:
                     logging.info(f"Progress: {completed}/{num_runs} iterations completed")
-                    
+                    get_projection_measures(averaged_predictions, all_predictions, completed, game_details)
+
             except Exception as e:
                 logging.error(f"Iteration {iteration} generated an exception: {e}")
-    
+
     # Calculate and log final averages with team names, std dev, and median
     logging.info("\n=== FINAL AVERAGED PREDICTIONS ===")
     for game_index in sorted(averaged_predictions.keys()):
@@ -358,11 +387,8 @@ def main(num_runs):
         if game_index in game_details:
             info = game_details[game_index]
             logging.info(
-                f"Game {game_index}: {info['away_team']} @ {info['home_team']} (Week {info['week']}, {info['year']}) | "
-                f"Mean: {average_pred} | Median: {median_pred} | StdDev: {std_dev} | Actual: {info['actual_score_difference']}"
+                f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}| Actual: {info['actual_score_difference']}"
             )
-            # Also log all individual predictions for this game
-            #logging.info(f"  All predictions for Game {game_index}: {sorted(all_predictions[game_index])}")
         else:
             logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
 
