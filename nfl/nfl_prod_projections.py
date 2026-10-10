@@ -388,16 +388,18 @@ def _load_or_create_projections_workbook(output_path):
     return _new_projections_workbook()
 
 
-def write_projections_spreadsheet(rows, year, output_dir=None):
+def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook acts as a running log for the season: each run adds its week's games below the earlier
-    weeks. A game already in the sheet (same week, year and teams) has its fair line refreshed, and its
-    actual score difference filled in if it was blank, but hand-entered values (spread, actual, notes)
-    are never overwritten. Layout follows the '2024 NFL Projections' workbook, with Notes moved to the
-    far right; columns that need manual entry are highlighted and the rest are formulas.
+    weeks. A game already in the sheet (same week, year and teams) keeps its original fair line, since
+    that is the line that was bet on. Actual score differences are refreshed for every game in the sheet
+    that has since been played, using `actual_lookup` ({(week, year, home, away): difference}) plus the
+    rows passed in. Spread and notes are never touched. Layout follows the '2024 NFL Projections'
+    workbook, with Notes moved to the far right; columns that need manual entry are highlighted and the
+    rest are formulas.
 
-    Returns (output_path, rows_added, rows_updated).
+    Returns (output_path, rows_added, actuals_updated).
     """
     from openpyxl.styles import PatternFill
 
@@ -416,30 +418,34 @@ def write_projections_spreadsheet(rows, year, output_dir=None):
     def game_key(week, game_year, home, away):
         return (str(week_value(week)), str(game_year), home, away)
 
-    existing_rows = {}
-    last_row = 1
-    for r in range(2, ws.max_row + 1):
-        if ws.cell(r, 3).value:
-            existing_rows[game_key(ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 3).value, ws.cell(r, 4).value)] = r
-            last_row = r
-
-    def played_actual(row):
+    def played_actual(actual):
         # Unplayed games carry a placeholder difference of 0
-        actual = row['actual']
         return None if actual in (0, None) or pd.isna(actual) else int(actual)
 
-    added = updated = 0
+    actuals = {}
+    for key, actual in (actual_lookup or {}).items():
+        if played_actual(actual) is not None:
+            actuals[game_key(*key)] = played_actual(actual)
     for row in rows:
-        fair_line = fair_line_as_home(float(row['projected']))
-        actual = played_actual(row)
-        key = game_key(row['week'], row['year'], row['home_team'], row['away_team'])
+        if played_actual(row['actual']) is not None:
+            actuals[game_key(row['week'], row['year'], row['home_team'], row['away_team'])] = played_actual(row['actual'])
 
+    existing_rows = {}
+    last_row = 1
+    actuals_updated = 0
+    for r in range(2, ws.max_row + 1):
+        if ws.cell(r, 3).value:
+            key = game_key(ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 3).value, ws.cell(r, 4).value)
+            existing_rows[key] = r
+            last_row = r
+            if key in actuals and ws.cell(r, 9).value != actuals[key]:
+                ws.cell(r, 9, actuals[key])
+                actuals_updated += 1
+
+    added = 0
+    for row in rows:
+        key = game_key(row['week'], row['year'], row['home_team'], row['away_team'])
         if key in existing_rows:
-            r = existing_rows[key]
-            ws.cell(r, 5, fair_line)
-            if actual is not None and ws.cell(r, 9).value in (None, ''):
-                ws.cell(r, 9, actual)
-            updated += 1
             continue
 
         last_row += 1
@@ -448,12 +454,12 @@ def write_projections_spreadsheet(rows, year, output_dir=None):
         ws.cell(r, 2, int(row['year']))
         ws.cell(r, 3, row['home_team'])
         ws.cell(r, 4, row['away_team'])
-        ws.cell(r, 5, fair_line).number_format = '0.0'
+        ws.cell(r, 5, fair_line_as_home(float(row['projected']))).number_format = '0.0'
         # F (spread), I (actual) and M (notes) are entered manually
         ws.cell(r, 7, f'=E{r}+F{r}')
         ws.cell(r, 8, f'=IF(G{r}>0,C{r},D{r})')
-        if actual is not None:
-            ws.cell(r, 9, actual)
+        if key in actuals:
+            ws.cell(r, 9, actuals[key])
         ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
         ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
         ws.cell(r, 12, f'=IF(F{r}="","",MAX(NORMSDIST(G{r}/$O$2),1-NORMSDIST(G{r}/$O$2)))').number_format = '0%'
@@ -463,7 +469,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None):
         added += 1
 
     wb.save(output_path)
-    return output_path, added, updated
+    return output_path, added, actuals_updated
 
 
 def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
@@ -818,9 +824,17 @@ def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_
                 'projected': round(averaged_predictions[game_index] / num_runs, 1),
                 'actual': info['actual_score_difference'],
             })
+    played_games = cached_data['all_games']
+    played_games = played_games[(played_games['year'].astype(str) == str(predict_year)) & (played_games['score_difference'] != 0)]
+    actual_lookup = {
+        (g.week_number, g.year, g.home_team, g.away_team): g.score_difference
+        for g in played_games.itertuples()
+    }
     try:
-        output_path, rows_added, rows_updated = write_projections_spreadsheet(final_rows, predict_year)
-        logging.info(f"Projections spreadsheet updated: {output_path} ({rows_added} games added, {rows_updated} refreshed)")
+        output_path, rows_added, actuals_updated = write_projections_spreadsheet(
+            final_rows, predict_year, actual_lookup=actual_lookup
+        )
+        logging.info(f"Projections spreadsheet updated: {output_path} ({rows_added} games added, {actuals_updated} actual differences updated)")
     except Exception as e:
         logging.error(f"Could not write projections spreadsheet: {e}")
 

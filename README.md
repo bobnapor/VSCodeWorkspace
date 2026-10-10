@@ -22,7 +22,7 @@ python nfl_prod_projections.py
 
 - Year and week are detected automatically; set `PREDICT_YEAR` / `PREDICT_WEEK` in the `__main__` block to override.
 - pro-football-reference blocks scripted requests, so pages saved from a browser into `C:/Users/Bobby/Downloads/NFL_Stats/` are used as a fallback.
-- Results are logged and appended to `<year>_nfl_projections.xlsx` on the Desktop. Each run adds its week below the earlier weeks; re-running a week refreshes its fair lines without touching the spread, actual and notes you entered.
+- Results are logged and appended to `<year>_nfl_projections.xlsx` on the Desktop. Each run adds its week below the earlier weeks. Fair lines already in the sheet are kept, and every run refreshes the actual score difference for all games played so far. Spread and notes are never touched.
 
 ## Crypto bot
 
