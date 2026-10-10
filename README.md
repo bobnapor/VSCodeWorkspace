@@ -27,13 +27,17 @@ python nfl_prod_projections.py
 - Results are logged and appended to `<year>_nfl_projections.xlsx` on the Desktop. Each run adds its week in week order, so a week run late is inserted after earlier weeks and before later ones. Fair lines already in the sheet are kept, and every run refreshes the actual score difference for all games played so far. Notes are never touched.
 - Blank spreads are filled in with DraftKings lines from Action Network's public scoreboard feed (home spread, negative = home favored). If DraftKings has no line for a game, the consensus line (then other books) is used and the run logs which book it took. Spreads already in the sheet are never replaced. Games that have been played get the closing line. Action Network has DraftKings lines from 2024, consensus lines only for 2023, and nothing earlier, so those stay blank.
 - Covering Team and Result cells are shaded light green for a win and light red for a loss, and each week's games are boxed with a bold outline.
-- The Backtest ATS Win % column shows how often the model's pick covered against the market at that size of disagreement (2014-2026 walk-forward: about 51% under 3 points, 53% for 3-6, 49% for 6 or more; break-even at -110 is 52.4%). Treat the projections as information to weigh rather than picks to follow. The table behind the column is in O:P of the sheet and the numbers are `ATS_HIT_RATE_BY_EDGE` in `nfl_sheet.py`.
+- The Backtest ATS Win % column shows how often the model's pick covered against the market at that size of disagreement (2014-2026 walk-forward: about 51% under 3 points, 53% for 3-6, 49% for 6 or more; break-even at -110 is 52.4%). The table behind the column is in R:S of the sheet and the numbers are `ATS_HIT_RATE_BY_EDGE` in `nfl_sheet.py`. Treat the Fair Line as information to weigh rather than a pick.
+- **Underdog signal** (columns O and P, the one finding with real statistical support): *Model Correction (as Home)* is how many points a second model (`nfl_signal.py`) thinks the spread is off, using play-by-play and box-score team ratings, and *Underdog Signal* names the underdog to bet when the correction points toward it by at least the threshold in S7 (default 0.5 points). In a 2006-2026 walk-forward test, underdog-side picks covered 54.8% (underdogs in general cover 51.3%), rising with the size of the correction, and picks on favorites showed nothing. Chance alone is very unlikely to explain it, but the underdog angle was found after looking at several cuts of the same history, the estimate is uncertain (about 53-56%), and your sportsbook's lines and limits are worse than the closing consensus tested, so forward-test it with small stakes first. `python nfl_research_signal.py` reproduces all of the evidence.
+- Each run also appends the current lines and public betting splits to `nfl/data_cache/line_log.csv` with a timestamp, so there will eventually be real data on how far lines move between when you bet and the close (the public history only has stale openers and the close).
 
 - The QB Injury Flag column (N) lists games where a team's previous starting quarterback is on this week's injury report (Out, Doubtful or Questionable) and games where the schedule expects a different starter than last week. It comes from the free nflverse injury reports, is refreshed on every run for games not yet played, and is kept as-is once a game has been played. It is information to read, not a signal the projections use: in backtesting it did not predict covers (see below).
 
 ## Research: can any model beat the closing spread?
 
-`nfl_research_model.py` is the test behind the production model: each season is predicted by a model trained only on earlier seasons, and it compares the previous production model, each stat set (yards and turnovers, plus first downs, points, plays, EPA), Elo, quarterback features and the closing spread, with paired significance tests. `nfl_prod_backtest.py` replays seasons week by week with the production model itself.
+`nfl_research_signal.py` is the evidence for the underdog signal (information test, underdog versus favorite picks against the no-model baseline, confidence, thresholds, a nested walk-forward that picks its own settings each season, and a placebo test). It runs on `nfl_lab.py`, a research framework with ratings on 37 box-score and play-by-play stats back to 1999 (`nfl_pbp_features.py` builds the play-by-play aggregates), market prices, weather and context features, and walk-forward scoring tools that report a discovery period (through 2017) and a holdout period separately. `nfl_lab_extra.py` (cover history, travel) and `nfl_market_moves.py` (opening lines and betting splits) hold the other angles that were tested and found to add nothing usable.
+
+`nfl_research_model.py` compares the margin model with the previous production model, each stat set (yards and turnovers, plus first downs, points, plays, EPA), Elo and quarterback features, with paired significance tests. `nfl_prod_backtest.py` replays seasons week by week with the production model.
 
 `nfl_research_ats.py` runs the same kind of walk-forward test against closing spreads for 2012-2026 (about 3,600 games) with other model types, including gradient boosting, and reports ATS win rates by season, edge size and spread size (including spreads of 4 and up).
 
@@ -41,6 +45,7 @@ python nfl_prod_projections.py
 
 ```
 cd nfl
+python nfl_research_signal.py
 python nfl_research_model.py
 python nfl_research_ats.py
 python nfl_research_injuries.py

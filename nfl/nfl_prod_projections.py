@@ -88,6 +88,35 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         final_rows.append({'week': label, 'year': season, 'home_team': home, 'away_team': away, 'projected': mean, 'actual': actual})
     logging.info("Projections complete!")
 
+    # The underdog signal: the correction to the spread that the research found worth flagging
+    try:
+        import nfl_signal
+        corrections = nfl_signal.week_corrections(season, week)
+        for row in final_rows:
+            row['correction'] = corrections.get((row['home_team'], row['away_team']))
+        spreads = sheet.fetch_draftkings_spreads(season, week)
+        logging.info(f"\n=== UNDERDOG SIGNALS (correction of at least {nfl_signal.SIGNAL_THRESHOLD} points toward the underdog) ===")
+        flagged = 0
+        for row in final_rows:
+            line, correction = spreads.get((row['home_team'], row['away_team'])), row.get('correction')
+            if line is None or correction is None or line == 0:
+                continue
+            home_is_dog = line > 0
+            if (home_is_dog and correction >= nfl_signal.SIGNAL_THRESHOLD) or (not home_is_dog and correction <= -nfl_signal.SIGNAL_THRESHOLD):
+                team, points = (row['home_team'], line) if home_is_dog else (row['away_team'], -line)
+                logging.info(f"{team} +{points:g} ({row['away_team']} at {row['home_team']}), correction {abs(correction):.1f} pts")
+                flagged += 1
+        logging.info(f"{flagged} underdog signals this week")
+    except Exception as e:
+        logging.warning(f"Could not compute the underdog signal: {e}")
+
+    try:
+        import nfl_market_moves
+        logged = nfl_market_moves.append_line_snapshot(season, week)
+        logging.info(f"Logged {logged} line snapshots to the line log")
+    except Exception as e:
+        logging.warning(f"Could not log line snapshots: {e}")
+
     played = table[(table['season'] == season) & table['result'].notna()]
     actual_lookup = {
         (week_label(g.game_type, g.week), season, TEAM_FULL_NAMES.get(g.home_team, g.home_team), TEAM_FULL_NAMES.get(g.away_team, g.away_team)): int(g.result)

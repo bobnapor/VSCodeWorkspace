@@ -28,12 +28,21 @@ SPREADSHEET_HEADERS = [
 # Columns filled in by hand: Spread (F), Actual Score Difference (I), Notes (M)
 MANUAL_INPUT_COLUMNS = (6, 9, 13)
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
-# Widths of the edge/hit-rate lookup table columns; columns A-M are sized to their content on every write
-SPREADSHEET_COLUMN_WIDTHS = {'O': 14.0, 'P': 16.0}
-# Quarterback injury notes live in column N, outside SPREADSHEET_HEADERS so sheets from before it was added still load
+# Quarterback injury notes (N), the model's correction to the spread (O) and the underdog signal (P) live outside
+# SPREADSHEET_HEADERS so sheets from before they were added still load
 QB_FLAG_COLUMN = 14
 QB_FLAG_HEADER = 'QB Injury Flag'
-LAST_SHEET_COLUMN = QB_FLAG_COLUMN
+CORRECTION_COLUMN = 15
+CORRECTION_HEADER = 'Model Correction (as Home)'
+SIGNAL_COLUMN = 16
+SIGNAL_HEADER = 'Underdog Signal'
+LAST_SHEET_COLUMN = SIGNAL_COLUMN
+# Settings and the edge/hit-rate lookup table sit to the right of the data, in columns R:S
+TABLE_COLUMNS = (18, 19)
+THRESHOLD_ROW = 7
+DEFAULT_SIGNAL_THRESHOLD = 0.5
+SPREADSHEET_COLUMN_WIDTHS = {'R': 16.0, 'S': 18.0}
+OLD_TABLE_HEADER = 'Edge (pts) from'
 
 PLAYOFF_WEEK_NAMES = {'WC': 'WildCard', 'DIV': 'Division', 'CON': 'ConfChamp', 'SB': 'SuperBowl'}
 
@@ -130,25 +139,44 @@ def _new_projections_workbook():
 def _ensure_qb_flag_header(ws):
     from openpyxl.styles import Alignment, Border, Font, Side
 
-    cell = ws.cell(1, QB_FLAG_COLUMN)
-    if cell.value != QB_FLAG_HEADER:
-        cell.value = QB_FLAG_HEADER
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.border = Border(bottom=Side(style='medium'))
+    for column, header in ((QB_FLAG_COLUMN, QB_FLAG_HEADER), (CORRECTION_COLUMN, CORRECTION_HEADER), (SIGNAL_COLUMN, SIGNAL_HEADER)):
+        cell = ws.cell(1, column)
+        if cell.value != header:
+            cell.value = header
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell.border = Border(bottom=Side(style='medium'))
 
 
 def _write_hit_rate_table(ws):
-    """Edge-size lookup table in O:P that the Backtest ATS Win % column reads from."""
+    """Settings and the edge-size lookup table in R:S; the Backtest ATS Win % column reads the table."""
     from openpyxl.styles import Alignment, Font
 
-    for col, title in ((15, 'Edge (pts) from'), (16, 'Backtest ATS Win %')):
+    edge_col, rate_col = TABLE_COLUMNS
+    for col, title in ((edge_col, 'Edge (pts) from'), (rate_col, 'Backtest ATS Win %')):
         cell = ws.cell(1, col, title)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     for r, (edge, hit_rate) in enumerate(ATS_HIT_RATE_BY_EDGE, start=2):
-        ws.cell(r, 15, edge)
-        ws.cell(r, 16, hit_rate).number_format = '0%'
+        ws.cell(r, edge_col, edge)
+        ws.cell(r, rate_col, hit_rate).number_format = '0%'
+    ws.cell(THRESHOLD_ROW, edge_col, 'Signal threshold (pts)').font = Font(bold=True)
+    if ws.cell(THRESHOLD_ROW, rate_col).value in (None, ''):
+        ws.cell(THRESHOLD_ROW, rate_col, DEFAULT_SIGNAL_THRESHOLD)  # editable: the correction needed to flag an underdog
+
+
+def _ensure_signal_formatting(ws):
+    """Light-blue highlight on any game the underdog signal flags."""
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import PatternFill
+
+    signal_range = f'P2:P1000'
+    for formatting in ws.conditional_formatting:
+        if str(formatting.sqref) == signal_range:
+            return
+    ws.conditional_formatting.add(
+        signal_range, FormulaRule(formula=['LEN($P2)>0'], fill=PatternFill(start_color='BDD7EE', end_color='BDD7EE', fill_type='solid'))
+    )
 
 
 def _load_or_create_projections_workbook(output_path):
@@ -166,6 +194,11 @@ def _load_or_create_projections_workbook(output_path):
 
     wb = load_workbook(output_path)
     ws = wb.active
+    if ws.cell(1, 15).value == OLD_TABLE_HEADER:
+        # sheets from before the signal columns kept the lookup table in O:P, which now hold the correction and signal
+        for r in range(1, 5):
+            ws.cell(r, 15).value = None
+            ws.cell(r, 16).value = None
     headers = [ws.cell(1, col).value for col in range(1, len(SPREADSHEET_HEADERS) + 1)]
     if headers[11] == OLD_COVER_PROBABILITY_HEADER:
         headers[11] = HIT_RATE_HEADER
@@ -291,6 +324,8 @@ def _autosize_columns(ws, records):
 
     flag_lengths = [len(str(record['qb_flag'])) for record in records if record.get('qb_flag')]
     ws.column_dimensions[get_column_letter(QB_FLAG_COLUMN)].width = min(max(flag_lengths, default=0) + 3, 90) if flag_lengths else 16
+    ws.column_dimensions[get_column_letter(CORRECTION_COLUMN)].width = 14
+    ws.column_dimensions[get_column_letter(SIGNAL_COLUMN)].width = max([len(name) for name in team_names] + [len(SIGNAL_HEADER)], default=16) + 3
 
 
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None):
@@ -322,6 +357,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     wb = _load_or_create_projections_workbook(output_path)
     ws = wb.active
     _ensure_result_formatting(ws)
+    _ensure_signal_formatting(ws)
     _write_hit_rate_table(ws)
     _ensure_qb_flag_header(ws)
 
@@ -355,7 +391,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'home': ws.cell(r, 3).value, 'away': ws.cell(r, 4).value,
             'fair_line': ws.cell(r, 5).value, 'spread': ws.cell(r, 6).value,
             'actual': ws.cell(r, 9).value, 'notes': ws.cell(r, 13).value,
-            'qb_flag': ws.cell(r, QB_FLAG_COLUMN).value,
+            'qb_flag': ws.cell(r, QB_FLAG_COLUMN).value, 'correction': ws.cell(r, CORRECTION_COLUMN).value,
         }
         key = game_key(record['week'], record['year'], record['home'], record['away'])
         existing_keys.add(key)
@@ -368,13 +404,17 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     for row in rows:
         key = game_key(row['week'], row['year'], row['home_team'], row['away_team'])
         if key in existing_keys:
+            # the correction is recorded once, like the fair line, so the sheet shows what was known when you bet
+            for record in records:
+                if game_key(record['week'], record['year'], record['home'], record['away']) == key and record['correction'] in (None, ''):
+                    record['correction'] = row.get('correction')
             continue
         existing_keys.add(key)
         records.append({
             'week': week_value(row['week']), 'year': int(row['year']),
             'home': row['home_team'], 'away': row['away_team'],
             'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None,
-            'actual': actuals.get(key), 'notes': None, 'qb_flag': None,
+            'actual': actuals.get(key), 'notes': None, 'qb_flag': None, 'correction': row.get('correction'),
         })
         added += 1
 
@@ -434,9 +474,14 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
         ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
         last_table_row = len(ATS_HIT_RATE_BY_EDGE) + 1
-        ws.cell(r, 12, f'=IF(F{r}="","",LOOKUP(ABS(G{r}),$O$2:$O${last_table_row},$P$2:$P${last_table_row}))').number_format = '0%'
+        edge_letter, rate_letter = 'R', 'S'
+        ws.cell(r, 12, f'=IF(F{r}="","",LOOKUP(ABS(G{r}),${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}))').number_format = '0%'
         ws.cell(r, 13, record['notes'])
         ws.cell(r, QB_FLAG_COLUMN, record['qb_flag'])
+        ws.cell(r, CORRECTION_COLUMN, record['correction']).number_format = '0.0'
+        # flag the underdog when the correction points that way by at least the threshold in S7
+        threshold = f'${rate_letter}${THRESHOLD_ROW}'
+        ws.cell(r, SIGNAL_COLUMN, f'=IF(OR(F{r}="",O{r}=""),"",IF(AND(F{r}>0,O{r}>={threshold}),C{r},IF(AND(F{r}<0,O{r}<=-{threshold}),D{r},"")))')
         for col in MANUAL_INPUT_COLUMNS:
             ws.cell(r, col).fill = manual_fill
 
