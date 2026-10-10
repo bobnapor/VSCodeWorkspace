@@ -311,11 +311,8 @@ SPREADSHEET_HEADERS = [
 # Columns filled in by hand: Spread (F), Actual Score Difference (I), Notes (M)
 MANUAL_INPUT_COLUMNS = (6, 9, 13)
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
-SPREADSHEET_COLUMN_WIDTHS = {
-    'A': 30.3, 'B': 18.5, 'C': 22.7, 'D': 22.7, 'E': 18.6, 'F': 15.7,
-    'G': 11.1, 'H': 22.7, 'I': 20.4, 'J': 22.7, 'K': 10.0,
-    'L': 18.0, 'M': 21.7, 'O': 12.0,
-}
+# Width of the Margin Std Dev settings column; columns A-M are sized to their content on every write
+SPREADSHEET_COLUMN_WIDTHS = {'O': 12.0}
 
 
 def fair_line_as_home(projected_difference):
@@ -478,6 +475,32 @@ def fetch_draftkings_spreads(year, week, max_retries=3):
     return spreads
 
 
+def _autosize_columns(ws, records):
+    """Fit columns A-M to what is written in them.
+
+    Formula columns hold values that aren't known until Excel calculates, so they are sized from what
+    they can show: team names, Win/Loss/Push, numbers and a percentage. Headers wrap onto two lines.
+    """
+    import math
+    from openpyxl.utils import get_column_letter
+    team_names = [record[field] for record in records for field in ('home', 'away')]
+    formula_samples = {
+        7: ['-99.5'],
+        8: team_names,
+        10: team_names + ['Push'],
+        11: ['Push', 'Loss'],
+        12: ['100%'],
+    }
+    for col, header in enumerate(SPREADSHEET_HEADERS, start=1):
+        samples = [str(ws.cell(r, col).value) for r in range(2, len(records) + 2) if col not in formula_samples
+                   and ws.cell(r, col).value is not None]
+        samples += formula_samples.get(col, [])
+        content_width = max((len(sample) for sample in samples), default=0)
+        header_width = max(max(len(word) for word in header.split()), math.ceil(len(header) / 2))
+        width = max(content_width, header_width) + 3
+        ws.column_dimensions[get_column_letter(col)].width = min(width, 60)
+
+
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
@@ -618,6 +641,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 bottom=week_outline if is_last else None,
             )
 
+    _autosize_columns(ws, records)
     wb.save(output_path)
     return output_path, added, actuals_updated, spreads_filled
 
