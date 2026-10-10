@@ -24,6 +24,8 @@ from nflpicks_v2_0_multithreaded_web import (
     predict_game,
     translate_week_number,
     get_last_regular_season_week,
+    get_current_season_year,
+    LOOKBACK_YEARS,
     off_url,
     def_url,
     games_url
@@ -182,20 +184,47 @@ def calculate_backtest_metrics(all_predictions, game_details, num_runs):
     return pd.DataFrame(results)
 
 
-def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, start_year=2019):
+def shift_stats_to_following_season(stats):
+    """Relabel each season's team stats as the following season's, following franchise renames."""
+    renames = {
+        'Oakland Raiders': 'Las Vegas Raiders',
+        'Washington Redskins': 'Washington Football Team',
+        'Washington Football Team': 'Washington Commanders',
+    }
+    shifted = []
+    for year_str, prior in stats.groupby('year'):
+        next_year = int(year_str) + 1
+        next_teams = set(stats.loc[stats['year'] == str(next_year), 'team'])
+        prior = prior.copy()
+        if next_teams:
+            prior['team'] = prior['team'].map(lambda t: t if t in next_teams else renames.get(t, t))
+        prior['year'] = str(next_year)
+        shifted.append(prior)
+    return pd.concat(shifted, ignore_index=True)
+
+
+def main_backtest(num_runs=10000, test_year=None, test_weeks=None, use_web=True, start_year=None,
+                  use_prior_season_stats=True):
     """
     Backtest the model on past games using web data
     
     Args:
         num_runs: Number of simulation iterations
-        test_year: Year to test on
-        test_weeks: List of weeks to test (e.g., [1, 2, 3, 4, 5]). 
+        test_year: Year to test on (default: the current season)
+        test_weeks: List of weeks to test (e.g., [1, 2, 3, 4, 5]). Default: every regular season week
+                    already played in test_year.
                     For playoffs use 19=WildCard, 20=Division, 21=ConfChamp, 22=SuperBowl (for 2021+)
         use_web: True to fetch from web, False to use local files
-        start_year: First year to load for training data
+        start_year: First year to load for training data (default: LOOKBACK_YEARS before test_year)
+        use_prior_season_stats: Features for a season's games come from the previous season's team stats.
+                    The available stats are season totals, which include the game being predicted,
+                    so using them directly leaks the result. Games from start_year have no prior
+                    season and are skipped.
     """
-    if test_weeks is None:
-        test_weeks = list(range(1, 19))  # All regular season weeks for 2021+ seasons
+    if test_year is None:
+        test_year = get_current_season_year()
+    if start_year is None:
+        start_year = test_year - LOOKBACK_YEARS
     
     # Setup logging
     log_filename = f'C:/Users/Bobby/nfl_backtest_web_{test_year}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
@@ -211,13 +240,13 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, 
     
     logging.info(f"Logging to file: {log_filename}")
     logging.info(f"Data source: {'Web URLs' if use_web else 'Local files'}")
-    logging.info(f"Backtesting {test_year} season, weeks: {test_weeks}")
     logging.info(f"Running {num_runs} iterations")
     
     # Pre-load all data once in main process
     logging.info("Loading data from source...")
     all_years_team_stats_arr = []
     all_games_arr = []
+    test_year_past = pd.DataFrame()
 
     for year in range(start_year, test_year + 1):
         logging.info(f"  Loading {year} data...")
@@ -228,6 +257,8 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, 
         all_games_arr.append(single_year_games_past)
         if not single_year_games_future.empty:
             all_games_arr.append(single_year_games_future)
+        if year == test_year:
+            test_year_past = single_year_games_past
         
         if use_web and not picks_web._web_blocked:
             time.sleep(1)  # Rate limiting for web requests
@@ -236,7 +267,19 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, 
         'stats': pd.concat(all_years_team_stats_arr, ignore_index=True),
         'all_games': pd.concat(all_games_arr, ignore_index=True)
     }
+    if use_prior_season_stats:
+        cached_data['stats'] = shift_stats_to_following_season(cached_data['stats'])
+        logging.info("Using prior-season team stats for every game so a game's own result is never in its features")
     logging.info("Data loading complete!")
+
+    if test_weeks is None:
+        last_regular_week = get_last_regular_season_week(test_year)
+        played_weeks = {translate_week_number(w, test_year) for w in test_year_past['week_number']} if not test_year_past.empty else set()
+        test_weeks = sorted(w for w in played_weeks if w is not None and w <= last_regular_week)
+    if not test_weeks:
+        logging.warning(f"No played games found for {test_year}; nothing to backtest")
+        return pd.DataFrame()
+    logging.info(f"Backtesting {test_year} season, weeks: {test_weeks}")
     
     averaged_predictions = {}
     all_predictions = {}
@@ -356,18 +399,17 @@ def main_backtest(num_runs=1000, test_year=2024, test_weeks=None, use_web=True, 
 
 if __name__ == "__main__":
     # Configuration
-    TEST_YEAR = 2024
-    TEST_WEEKS = list(range(1, 19))  # Regular season weeks 1-18
+    TEST_YEAR = None  # None = current season; set a year to override
+    TEST_WEEKS = None  # None = every regular season week already played; set a list to override
     # For playoffs, use: [19, 20, 21, 22] for WildCard, Division, ConfChamp, SuperBowl (2021+ seasons)
-    NUM_RUNS = 1000
+    NUM_RUNS = 10000
     USE_WEB = True  # Set to False to use local HTML files
-    START_YEAR = 2019  # First year to load for training data
+    START_YEAR = None  # None = LOOKBACK_YEARS before the test year; set a year to override
     
     results = main_backtest(
         num_runs=NUM_RUNS,
         test_year=TEST_YEAR,
         test_weeks=TEST_WEEKS,
-        include_playoffs=False,
         use_web=USE_WEB,
         start_year=START_YEAR
     )

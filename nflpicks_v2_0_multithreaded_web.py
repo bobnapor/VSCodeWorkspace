@@ -30,6 +30,9 @@ off_template = file_dir + 'yyyy NFL Standings & Team Stats _ Pro-Football-Refere
 # Global cache for web data (shared across iterations)
 _web_data_cache = {}
 
+# Number of past seasons loaded for training, in addition to the season being predicted
+LOOKBACK_YEARS = 6
+
 # Columns to use for stats
 stat_columns_to_use = {
     'team',
@@ -292,7 +295,108 @@ def load_data_for_year(year, off_url, def_url, games_url, use_web=True):
 
     return single_year_combined_stats, single_year_games_past, single_year_games_future
 
-PROJECTION_HEADER = "Game|Week|Year|Home|Away|Mean|Median|StdDev|Actual"
+PROJECTION_HEADER = "Game|Week|Year|Home|Away|Mean|FairLine(Home)|StdDev|Actual"
+
+# Std dev of (predicted - actual) home margin from nflpicks_backtest_web.py over 2022-2025 regular seasons
+# (1084 games, 200 runs per season, prior-season stats only so a game's result is never in its features).
+# Used to turn a points edge into a cover probability.
+NFL_MARGIN_STD_DEV = 13.9
+
+SPREADSHEET_HEADERS = [
+    'Week', 'Year', 'Home Team', 'Away Team',
+    'Fair Line (as Home)', 'Spread (as Home)', 'Fair Line vs Spread',
+    'Side to Cover', 'Actual Score Difference (as Home)', 'Covering Team', 'Result',
+    'Cover Probability (Side to Cover)', 'Notes',
+]
+# Columns filled in by hand: Spread (F), Actual Score Difference (I), Notes (M)
+MANUAL_INPUT_COLUMNS = (6, 9, 13)
+MANUAL_INPUT_FILL_COLOR = 'FFFF99'
+SPREADSHEET_COLUMN_WIDTHS = {
+    'A': 30.3, 'B': 18.5, 'C': 22.7, 'D': 22.7, 'E': 18.6, 'F': 15.7,
+    'G': 11.1, 'H': 22.7, 'I': 20.4, 'J': 22.7, 'K': 10.0,
+    'L': 18.0, 'M': 21.7, 'O': 12.0,
+}
+
+
+def fair_line_as_home(projected_difference):
+    """Projected home margin rounded to the nearest half point, same sign as the projection.
+
+    +0.6 (home wins by 0.6) gives +0.5; -9.2 (home loses by 9.2) gives -9.0.
+    """
+    return round(projected_difference * 2) / 2 + 0.0
+
+
+def get_desktop_path():
+    """Desktop folder, honoring OneDrive redirection."""
+    import ctypes
+    from ctypes import wintypes
+    buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+    CSIDL_DESKTOPDIRECTORY = 0x10
+    ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_DESKTOPDIRECTORY, None, 0, buf)
+    return buf.value
+
+
+def write_projections_spreadsheet(rows, year, output_dir=None):
+    """Write final projections to <Desktop>/<year>_nfl_projections.xlsx.
+
+    Layout follows the '2024 NFL Projections' workbook, with Notes moved to the far right. Columns
+    that need manual entry (spread, actual score difference, notes) are highlighted and left blank,
+    and the remaining columns are formulas.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    manual_fill = PatternFill(fill_type='solid', start_color=MANUAL_INPUT_FILL_COLOR, end_color=MANUAL_INPUT_FILL_COLOR)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Sheet1'
+
+    header_border = Border(bottom=Side(style='medium'))
+    for col, title in enumerate(SPREADSHEET_HEADERS, start=1):
+        cell = ws.cell(row=1, column=col, value=title)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = header_border
+    ws.row_dimensions[1].height = 29.5
+    for letter, width in SPREADSHEET_COLUMN_WIDTHS.items():
+        ws.column_dimensions[letter].width = width
+
+    def week_value(week):
+        return int(week) if str(week).isdigit() else week
+
+    for r, row in enumerate(rows, start=2):
+        ws.cell(r, 1, week_value(row['week']))
+        ws.cell(r, 2, int(row['year']))
+        ws.cell(r, 3, row['home_team'])
+        ws.cell(r, 4, row['away_team'])
+        ws.cell(r, 5, fair_line_as_home(float(row['projected']))).number_format = '0.0'
+        # F (spread), I (actual) and M (notes) are entered manually
+        ws.cell(r, 7, f'=E{r}+F{r}')
+        ws.cell(r, 8, f'=IF(G{r}>0,C{r},D{r})')
+        actual = row['actual']
+        # Unplayed games carry a placeholder difference of 0
+        if actual not in (0, None) and not pd.isna(actual):
+            ws.cell(r, 9, int(actual))
+        ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
+        ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
+        ws.cell(r, 12, f'=IF(F{r}="","",MAX(NORMSDIST(G{r}/$O$2),1-NORMSDIST(G{r}/$O$2)))').number_format = '0%'
+        for col in MANUAL_INPUT_COLUMNS:
+            ws.cell(r, col).fill = manual_fill
+
+    for col in MANUAL_INPUT_COLUMNS:
+        ws.cell(1, col).fill = manual_fill
+
+    ws['O1'] = 'Margin Std Dev'
+    ws['O1'].font = Font(bold=True)
+    ws['O1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    ws['O2'] = NFL_MARGIN_STD_DEV
+
+    output_dir = output_dir or get_desktop_path()
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f'{year}_nfl_projections.xlsx')
+    wb.save(output_path)
+    return output_path
 
 
 def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
@@ -301,13 +405,13 @@ def get_projection_measures(averaged_predictions, all_predictions, num_runs, gam
         predictions_array = np.array(all_predictions[game_index])
         average_pred = round(averaged_predictions[game_index] / num_runs, 1)
         std_dev = round(np.std(predictions_array), 2)
-        median_pred = round(np.median(predictions_array), 1)
+        median_pred = round(np.median(predictions_array), 1)  # still computed, not printed
 
         if game_index in game_details:
             info = game_details[game_index]
-            logging.info(f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}|{info['actual_score_difference']}")
+            logging.info(f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{fair_line_as_home(average_pred)}|{std_dev}|{info['actual_score_difference']}")
         else:
-            logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
+            logging.info(f"Game {game_index}: Mean:{average_pred}|FairLine(Home):{fair_line_as_home(average_pred)}|StdDev:{std_dev}")
 
 
 def translate_week_number(week_str, year):
@@ -353,6 +457,34 @@ def get_last_regular_season_week(year):
     """
     year_int = int(year)
     return 18 if year_int >= 2021 else 17
+
+
+def get_current_season_year(today=None):
+    """NFL season year for today's date; January and February still belong to the season that just ended."""
+    today = today or datetime.now()
+    return today.year if today.month >= 3 else today.year - 1
+
+
+def find_next_week_to_predict(games_past, games_future, year):
+    """Earliest week of `year` that still has unplayed games.
+
+    If the season is complete, falls back to the last week that was played.
+    """
+    def weeks_for(games):
+        if games.empty:
+            return []
+        year_games = games[games['year'].astype(str) == str(year)]
+        weeks = [translate_week_number(w, year) for w in year_games['week_number']]
+        return [w for w in weeks if w is not None]
+
+    upcoming = weeks_for(games_future)
+    if upcoming:
+        return min(upcoming)
+    played = weeks_for(games_past)
+    if played:
+        logging.warning(f"No unplayed games left in {year}; using last played week {max(played)}")
+        return max(played)
+    raise ValueError(f"No games found for {year}; cannot determine the week to predict")
 
 
 def run_single_iteration(iteration, cached_data, predict_year, predict_week):
@@ -486,7 +618,15 @@ def run_single_iteration(iteration, cached_data, predict_year, predict_week):
     return iteration_predictions, game_info
 
 
-def main(num_runs, predict_year=2026, predict_week=4, use_web=True):
+def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_years=LOOKBACK_YEARS):
+    """Predict one week of games.
+
+    predict_year / predict_week default to the current season and the first week with unplayed games.
+    Training data covers `lookback_years` seasons before predict_year plus predict_year itself.
+    """
+    if predict_year is None:
+        predict_year = get_current_season_year()
+
     # Setup logging to file - only in main process
     log_filename = f'C:/Users/Bobby/nfl_predictions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
     logging.basicConfig(
@@ -501,14 +641,15 @@ def main(num_runs, predict_year=2026, predict_week=4, use_web=True):
     
     logging.info(f"Logging to file: {log_filename}")
     logging.info(f"Data source: {'Web URLs' if use_web else 'Local files'}")
-    logging.info(f"Predicting: Year {predict_year}, Week {predict_week}")
     
     # Pre-load all data once in main process
     logging.info("Loading data from source...")
     all_years_team_stats_arr = []
     all_games_arr = []  # Combined past and future games
+    predict_year_past = pd.DataFrame()
+    predict_year_future = pd.DataFrame()
 
-    for year in range(2020, max(2027, predict_year + 1)):
+    for year in range(predict_year - lookback_years, predict_year + 1):
         logging.info(f"  Loading {year} data...")
         single_year_combined_stats, single_year_games_past, single_year_games_future = load_data_for_year(
             year, off_url, def_url, games_url, use_web=use_web
@@ -518,6 +659,8 @@ def main(num_runs, predict_year=2026, predict_week=4, use_web=True):
         all_games_arr.append(single_year_games_past)
         if not single_year_games_future.empty:
             all_games_arr.append(single_year_games_future)
+        if year == predict_year:
+            predict_year_past, predict_year_future = single_year_games_past, single_year_games_future
         
         if use_web and not _web_blocked:
             time.sleep(1)  # Rate limiting for web requests
@@ -527,6 +670,10 @@ def main(num_runs, predict_year=2026, predict_week=4, use_web=True):
         'all_games': pd.concat(all_games_arr, ignore_index=True)
     }
     logging.info("Data loading complete!")
+
+    if predict_week is None:
+        predict_week = find_next_week_to_predict(predict_year_past, predict_year_future, predict_year)
+    logging.info(f"Predicting: Year {predict_year}, Week {predict_week}")
     
     averaged_predictions = {}
     all_predictions = {}  # Store all predictions for each game for std dev and median
@@ -580,23 +727,42 @@ def main(num_runs, predict_year=2026, predict_week=4, use_web=True):
         predictions_array = np.array(all_predictions[game_index])
         average_pred = round(averaged_predictions[game_index] / num_runs, 1)
         std_dev = round(np.std(predictions_array), 2)
-        median_pred = round(np.median(predictions_array), 1)
+        median_pred = round(np.median(predictions_array), 1)  # still computed, not printed
         
         if game_index in game_details:
             info = game_details[game_index]
             logging.info(
-                f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{median_pred}|{std_dev}|{info['actual_score_difference']}"            )
+                f"{game_index}|{info['week']}|{info['year']}|{info['home_team']}|{info['away_team']}|{average_pred}|{fair_line_as_home(average_pred)}|{std_dev}|{info['actual_score_difference']}"
+            )
         else:
-            logging.info(f"Game {game_index}: Mean:{average_pred}|Median:{median_pred}|StdDev:{std_dev}")
+            logging.info(f"Game {game_index}: Mean:{average_pred}|FairLine(Home):{fair_line_as_home(average_pred)}|StdDev:{std_dev}")
 
     logging.info("Projections complete!")
+
+    final_rows = []
+    for game_index in sorted(averaged_predictions.keys()):
+        if game_index in game_details:
+            info = game_details[game_index]
+            final_rows.append({
+                'week': info['week'],
+                'year': info['year'],
+                'home_team': info['home_team'],
+                'away_team': info['away_team'],
+                'projected': round(averaged_predictions[game_index] / num_runs, 1),
+                'actual': info['actual_score_difference'],
+            })
+    try:
+        output_path = write_projections_spreadsheet(final_rows, predict_year)
+        logging.info(f"Projections spreadsheet written to: {output_path}")
+    except Exception as e:
+        logging.error(f"Could not write projections spreadsheet: {e}")
 
 
 if __name__ == "__main__":
     # Configuration
-    PREDICT_YEAR = 2026
-    PREDICT_WEEK = 5
-    NUM_RUNS = 10000
+    PREDICT_YEAR = None  # None = current season; set a year to override
+    PREDICT_WEEK = None  # None = first week with unplayed games; set a week number to override
+    NUM_RUNS = 1#0000
     USE_WEB = True  # Set to False to use local HTML files
     
     main(
