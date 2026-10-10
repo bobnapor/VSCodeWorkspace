@@ -2,3 +2,4 @@
 __pycache__/
 *.pyc
 fantasy_football_web/fantasy_football.db
+nfl/data_cache/
