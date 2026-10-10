@@ -23,7 +23,8 @@ python nfl_prod_projections.py
 - Year and week are detected automatically; set `PREDICT_YEAR` / `PREDICT_WEEK` in the `__main__` block to override.
 - pro-football-reference blocks scripted requests, so pages saved from a browser into `C:/Users/Bobby/Downloads/NFL_Stats/` are used as a fallback.
 - Results are logged and appended to `<year>_nfl_projections.xlsx` on the Desktop. Each run adds its week in week order, so a week run late is inserted after earlier weeks and before later ones. Fair lines already in the sheet are kept, and every run refreshes the actual score difference for all games played so far. Notes are never touched.
-- Blank spreads are filled in with DraftKings lines from Action Network's public scoreboard feed (home spread, negative = home favored). Spreads already in the sheet are never replaced. Games that have been played get the closing line, and seasons before 2025 have no DraftKings data, so those stay blank.
+- Blank spreads are filled in with DraftKings lines from Action Network's public scoreboard feed (home spread, negative = home favored). If DraftKings has no line for a game, the consensus line (then other books) is used and the run logs which book it took. Spreads already in the sheet are never replaced. Games that have been played get the closing line. Action Network has DraftKings lines from 2024, consensus lines only for 2023, and nothing earlier, so those stay blank.
+- Covering Team and Result cells are shaded light green for a win and light red for a loss.
 
 ## Crypto bot
 

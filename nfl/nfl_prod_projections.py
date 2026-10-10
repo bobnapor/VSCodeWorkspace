@@ -336,6 +336,32 @@ def get_desktop_path():
     return buf.value
 
 
+RESULT_FORMAT_RANGE = 'J2:K1000'
+RESULT_FORMAT_RULES = (
+    ('Win', 'C6EFCE'),   # light green
+    ('Loss', 'FFC7CE'),  # light red
+)
+
+
+def _ensure_result_formatting(ws):
+    """Shade the Covering Team and Result cells green for a win and red for a loss.
+
+    Applied to rows well past the current data so appended games are covered, and only added when the
+    sheet doesn't already have the rules so repeated runs don't stack duplicates.
+    """
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import PatternFill
+
+    for formatting in ws.conditional_formatting:
+        if str(formatting.sqref) == RESULT_FORMAT_RANGE:
+            return
+    for result, color in RESULT_FORMAT_RULES:
+        ws.conditional_formatting.add(
+            RESULT_FORMAT_RANGE,
+            FormulaRule(formula=[f'$K2="{result}"'], fill=PatternFill(start_color=color, end_color=color, fill_type='solid')),
+        )
+
+
 def _new_projections_workbook():
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -391,15 +417,34 @@ def _load_or_create_projections_workbook(output_path):
 DRAFTKINGS_BOOK_ID = 68  # "DK NJ" on Action Network
 ACTION_NETWORK_SCOREBOARD_URL = 'https://api.actionnetwork.com/web/v2/scoreboard/nfl'
 
+# Books to take a spread from, in order of preference: DraftKings first, then the consensus line, then
+# other sportsbooks, with the opening line last. Only used for games DraftKings has no line for.
+SPREAD_BOOK_PREFERENCE = (
+    (DRAFTKINGS_BOOK_ID, 'DraftKings NJ'),
+    (1534, 'DraftKings PA'),
+    (15, 'Consensus'),
+    (69, 'FanDuel NJ'),
+    (79, 'Action Network book 79'),
+    (71, 'Action Network book 71'),
+    (75, 'Action Network book 75'),
+    (74, 'Action Network book 74'),
+    (972, 'Action Network book 972'),
+    (123, 'Action Network book 123'),
+    (30, 'Opening line'),
+)
+
 
 def fetch_draftkings_spreads(year, week, max_retries=3):
-    """DraftKings point spreads for one regular-season week, from Action Network's public scoreboard feed.
+    """Point spreads for one regular-season week from Action Network's public scoreboard feed.
+
+    Uses the DraftKings line when there is one and otherwise the first available book in
+    SPREAD_BOOK_PREFERENCE, logging each game that had to use a different book.
 
     Returns {(home_team, away_team): spread as home} where a negative number means the home team is favored,
     matching the Spread column. Past weeks return the closing line. Returns {} when the feed is unavailable
-    or has no DraftKings lines (Action Network only has them for recent seasons), so the sheet is left blank.
+    or has no lines for that season (Action Network has none before 2023), so the sheet is left blank.
     """
-    params = {'bookIds': DRAFTKINGS_BOOK_ID, 'season': year, 'week': week}
+    params = {'bookIds': ','.join(str(book_id) for book_id, _ in SPREAD_BOOK_PREFERENCE), 'season': year, 'week': week}
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
     for attempt in range(max_retries):
         try:
@@ -411,7 +456,7 @@ def fetch_draftkings_spreads(year, week, max_retries=3):
             if attempt < max_retries - 1:
                 time.sleep(2 * (attempt + 1))
             else:
-                logging.warning(f"Could not fetch DraftKings spreads for {year} week {week}: {e}")
+                logging.warning(f"Could not fetch spreads for {year} week {week}: {e}")
                 return {}
 
     spreads = {}
@@ -419,10 +464,17 @@ def fetch_draftkings_spreads(year, week, max_retries=3):
         names = {team['id']: team['full_name'] for team in game.get('teams', [])}
         home = names.get(game.get('home_team_id'))
         away = names.get(game.get('away_team_id'))
-        lines = game.get('markets', {}).get(str(DRAFTKINGS_BOOK_ID), {}).get('event', {}).get('spread', [])
-        home_line = next((line['value'] for line in lines if line.get('side') == 'home'), None)
-        if home and away and home_line is not None:
+        if not (home and away):
+            continue
+        for book_id, book_name in SPREAD_BOOK_PREFERENCE:
+            lines = game.get('markets', {}).get(str(book_id), {}).get('event', {}).get('spread', [])
+            home_line = next((line['value'] for line in lines if line.get('side') == 'home'), None)
+            if home_line is None:
+                continue
             spreads[(home, away)] = float(home_line)
+            if book_id != DRAFTKINGS_BOOK_ID:
+                logging.info(f"No DraftKings spread for {away} at {home} (week {week}); using {book_name}: {home_line}")
+            break
     return spreads
 
 
@@ -452,6 +504,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     wb = _load_or_create_projections_workbook(output_path)
     ws = wb.active
+    _ensure_result_formatting(ws)
 
     def week_value(week):
         return int(week) if str(week).isdigit() else week
@@ -929,7 +982,7 @@ def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_
 if __name__ == "__main__":
     # Configuration
     PREDICT_YEAR = None  # None = current season; set a year to override
-    PREDICT_WEEK = 4  # None = first week with unplayed games; set a week number to override
+    PREDICT_WEEK = None  # None = first week with unplayed games; set a week number to override
     NUM_RUNS = 1#0000
     USE_WEB = True  # Set to False to use local HTML files
     
