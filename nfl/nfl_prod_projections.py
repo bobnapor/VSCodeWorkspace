@@ -391,8 +391,9 @@ def _load_or_create_projections_workbook(output_path):
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
-    The workbook acts as a running log for the season: each run adds its week's games below the earlier
-    weeks. A game already in the sheet (same week, year and teams) keeps its original fair line, since
+    The workbook acts as a running log for the season: each run adds its week's games in week order, so
+    a week run after later weeks is inserted after the weeks before it and ahead of the weeks that follow.
+    A game already in the sheet (same week, year and teams) keeps its original fair line, since
     that is the line that was bet on. Actual score differences are refreshed for every game in the sheet
     that has since been played, using `actual_lookup` ({(week, year, home, away): difference}) plus the
     rows passed in. Spread and notes are never touched. Layout follows the '2024 NFL Projections'
@@ -430,43 +431,69 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         if played_actual(row['actual']) is not None:
             actuals[game_key(row['week'], row['year'], row['home_team'], row['away_team'])] = played_actual(row['actual'])
 
-    existing_rows = {}
-    last_row = 1
+    # Read the existing games so the sheet can be rewritten in week order
+    records = []
+    existing_keys = set()
     actuals_updated = 0
     for r in range(2, ws.max_row + 1):
-        if ws.cell(r, 3).value:
-            key = game_key(ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 3).value, ws.cell(r, 4).value)
-            existing_rows[key] = r
-            last_row = r
-            if key in actuals and ws.cell(r, 9).value != actuals[key]:
-                ws.cell(r, 9, actuals[key])
-                actuals_updated += 1
+        if not ws.cell(r, 3).value:
+            continue
+        record = {
+            'week': ws.cell(r, 1).value, 'year': ws.cell(r, 2).value,
+            'home': ws.cell(r, 3).value, 'away': ws.cell(r, 4).value,
+            'fair_line': ws.cell(r, 5).value, 'spread': ws.cell(r, 6).value,
+            'actual': ws.cell(r, 9).value, 'notes': ws.cell(r, 13).value,
+        }
+        key = game_key(record['week'], record['year'], record['home'], record['away'])
+        existing_keys.add(key)
+        if key in actuals and record['actual'] != actuals[key]:
+            record['actual'] = actuals[key]
+            actuals_updated += 1
+        records.append(record)
 
     added = 0
     for row in rows:
         key = game_key(row['week'], row['year'], row['home_team'], row['away_team'])
-        if key in existing_rows:
+        if key in existing_keys:
             continue
+        existing_keys.add(key)
+        records.append({
+            'week': week_value(row['week']), 'year': int(row['year']),
+            'home': row['home_team'], 'away': row['away_team'],
+            'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None,
+            'actual': actuals.get(key), 'notes': None,
+        })
+        added += 1
 
-        last_row += 1
-        r = last_row
-        ws.cell(r, 1, week_value(row['week']))
-        ws.cell(r, 2, int(row['year']))
-        ws.cell(r, 3, row['home_team'])
-        ws.cell(r, 4, row['away_team'])
-        ws.cell(r, 5, fair_line_as_home(float(row['projected']))).number_format = '0.0'
+    def season_order(record):
+        week_number = translate_week_number(str(record['week']), record['year'])
+        return (int(record['year']), week_number if week_number is not None else 99)
+
+    # Stable sort: a week run late slots in after earlier weeks and before later ones, and games
+    # within a week keep the order they were first written in
+    records.sort(key=season_order)
+
+    for r in range(2, ws.max_row + 1):
+        for col in range(1, len(SPREADSHEET_HEADERS) + 1):
+            ws.cell(r, col).value = None
+
+    for r, record in enumerate(records, start=2):
+        ws.cell(r, 1, record['week'])
+        ws.cell(r, 2, record['year'])
+        ws.cell(r, 3, record['home'])
+        ws.cell(r, 4, record['away'])
+        ws.cell(r, 5, record['fair_line']).number_format = '0.0'
         # F (spread), I (actual) and M (notes) are entered manually
+        ws.cell(r, 6, record['spread'])
         ws.cell(r, 7, f'=E{r}+F{r}')
         ws.cell(r, 8, f'=IF(G{r}>0,C{r},D{r})')
-        if key in actuals:
-            ws.cell(r, 9, actuals[key])
+        ws.cell(r, 9, record['actual'])
         ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
         ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
         ws.cell(r, 12, f'=IF(F{r}="","",MAX(NORMSDIST(G{r}/$O$2),1-NORMSDIST(G{r}/$O$2)))').number_format = '0%'
+        ws.cell(r, 13, record['notes'])
         for col in MANUAL_INPUT_COLUMNS:
             ws.cell(r, col).fill = manual_fill
-        existing_rows[key] = r
-        added += 1
 
     wb.save(output_path)
     return output_path, added, actuals_updated
@@ -842,7 +869,7 @@ def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_
 if __name__ == "__main__":
     # Configuration
     PREDICT_YEAR = None  # None = current season; set a year to override
-    PREDICT_WEEK = None  # None = first week with unplayed games; set a week number to override
+    PREDICT_WEEK = 4  # None = first week with unplayed games; set a week number to override
     NUM_RUNS = 1#0000
     USE_WEB = True  # Set to False to use local HTML files
     
