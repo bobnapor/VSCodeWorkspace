@@ -25,6 +25,7 @@ python nfl_prod_projections.py
 - Results are logged and appended to `<year>_nfl_projections.xlsx` on the Desktop. Each run adds its week in week order, so a week run late is inserted after earlier weeks and before later ones. Fair lines already in the sheet are kept, and every run refreshes the actual score difference for all games played so far. Notes are never touched.
 - Blank spreads are filled in with DraftKings lines from Action Network's public scoreboard feed (home spread, negative = home favored). If DraftKings has no line for a game, the consensus line (then other books) is used and the run logs which book it took. Spreads already in the sheet are never replaced. Games that have been played get the closing line. Action Network has DraftKings lines from 2024, consensus lines only for 2023, and nothing earlier, so those stay blank.
 - Covering Team and Result cells are shaded light green for a win and light red for a loss, and each week's games are boxed with a bold outline.
+- The Backtest ATS Win % column shows how often the model's pick covered against the market at that size of disagreement (2023-2025 backtest: about 54% under 3 points, 51% for 3-6, 43% for 6 or more). The model has not beaten the DraftKings/consensus lines in backtesting, and its biggest disagreements did worst, so treat the projections as information to weigh rather than picks to follow. The table behind the column is in O:P of the sheet and the numbers are `ATS_HIT_RATE_BY_EDGE` in the script.
 
 ## Crypto bot
 

@@ -297,22 +297,25 @@ def load_data_for_year(year, off_url, def_url, games_url, use_web=True):
 
 PROJECTION_HEADER = "Game|Week|Year|Home|Away|Mean|FairLine(Home)|StdDev|Actual"
 
-# Std dev of (predicted - actual) home margin from nfl_prod_backtest.py over 2022-2025 regular seasons
-# (1084 games, 200 runs per season, prior-season stats only so a game's result is never in its features).
-# Used to turn a points edge into a cover probability.
-NFL_MARGIN_STD_DEV = 13.9
+# How often the model's pick covered against DraftKings/consensus lines in nfl_prod_backtest.py over the
+# 2023-2025 regular seasons (798 games; prior-season stats only so a game's result is never in its
+# features). Each pair is (smallest edge in points, ATS win rate for edges from there to the next row).
+# Bigger disagreements with the market did worse, not better, so these are not probabilities of covering.
+ATS_HIT_RATE_BY_EDGE = ((0, 0.54), (3, 0.51), (6, 0.43))
+HIT_RATE_HEADER = 'Backtest ATS Win % (at this edge)'
+OLD_COVER_PROBABILITY_HEADER = 'Cover Probability (Side to Cover)'
 
 SPREADSHEET_HEADERS = [
     'Week', 'Year', 'Home Team', 'Away Team',
     'Fair Line (as Home)', 'Spread (as Home)', 'Fair Line vs Spread',
     'Side to Cover', 'Actual Score Difference (as Home)', 'Covering Team', 'Result',
-    'Cover Probability (Side to Cover)', 'Notes',
+    HIT_RATE_HEADER, 'Notes',
 ]
 # Columns filled in by hand: Spread (F), Actual Score Difference (I), Notes (M)
 MANUAL_INPUT_COLUMNS = (6, 9, 13)
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
-# Width of the Margin Std Dev settings column; columns A-M are sized to their content on every write
-SPREADSHEET_COLUMN_WIDTHS = {'O': 12.0}
+# Widths of the edge/hit-rate lookup table columns; columns A-M are sized to their content on every write
+SPREADSHEET_COLUMN_WIDTHS = {'O': 14.0, 'P': 16.0}
 
 
 def fair_line_as_home(projected_difference):
@@ -380,18 +383,29 @@ def _new_projections_workbook():
     for col in MANUAL_INPUT_COLUMNS:
         ws.cell(1, col).fill = manual_fill
 
-    ws['O1'] = 'Margin Std Dev'
-    ws['O1'].font = Font(bold=True)
-    ws['O1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    ws['O2'] = NFL_MARGIN_STD_DEV
+    _write_hit_rate_table(ws)
     return wb
+
+
+def _write_hit_rate_table(ws):
+    """Edge-size lookup table in O:P that the Backtest ATS Win % column reads from."""
+    from openpyxl.styles import Alignment, Font
+
+    for col, title in ((15, 'Edge (pts) from'), (16, 'Backtest ATS Win %')):
+        cell = ws.cell(1, col, title)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    for r, (edge, hit_rate) in enumerate(ATS_HIT_RATE_BY_EDGE, start=2):
+        ws.cell(r, 15, edge)
+        ws.cell(r, 16, hit_rate).number_format = '0%'
 
 
 def _load_or_create_projections_workbook(output_path):
     """Open the existing year workbook, or start a new one.
 
     An existing file whose header row doesn't match the current layout is copied to a timestamped
-    backup instead of being appended to, so older layouts are never corrupted.
+    backup instead of being appended to, so older layouts are never corrupted. The one exception is
+    the old Cover Probability column header, which is renamed in place.
     """
     import shutil
     from openpyxl import load_workbook
@@ -402,6 +416,9 @@ def _load_or_create_projections_workbook(output_path):
     wb = load_workbook(output_path)
     ws = wb.active
     headers = [ws.cell(1, col).value for col in range(1, len(SPREADSHEET_HEADERS) + 1)]
+    if headers[11] == OLD_COVER_PROBABILITY_HEADER:
+        headers[11] = HIT_RATE_HEADER
+        ws.cell(1, 12).value = HIT_RATE_HEADER
     if headers == SPREADSHEET_HEADERS:
         return wb
 
@@ -529,6 +546,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     wb = _load_or_create_projections_workbook(output_path)
     ws = wb.active
     _ensure_result_formatting(ws)
+    _write_hit_rate_table(ws)
 
     def week_value(week):
         return int(week) if str(week).isdigit() else week
@@ -624,7 +642,8 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, 9, record['actual'])
         ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
         ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
-        ws.cell(r, 12, f'=IF(F{r}="","",MAX(NORMSDIST(G{r}/$O$2),1-NORMSDIST(G{r}/$O$2)))').number_format = '0%'
+        last_table_row = len(ATS_HIT_RATE_BY_EDGE) + 1
+        ws.cell(r, 12, f'=IF(F{r}="","",LOOKUP(ABS(G{r}),$O$2:$O${last_table_row},$P$2:$P${last_table_row}))').number_format = '0%'
         ws.cell(r, 13, record['notes'])
         for col in MANUAL_INPUT_COLUMNS:
             ws.cell(r, col).fill = manual_fill
