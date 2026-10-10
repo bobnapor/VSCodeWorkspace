@@ -186,7 +186,8 @@ def walk_forward(features, columns=FEATURES, alpha=500.0, first_test=FIRST_TEST_
     return pd.concat(outputs, ignore_index=True)
 
 
-def walk_forward_boosted(features, first_test=FIRST_TEST_SEASON, last_test=LAST_SEASON):
+def walk_forward_boosted(features, extra_columns=(), first_test=FIRST_TEST_SEASON, last_test=LAST_SEASON,
+                         first_train=FIRST_SEASON):
     """Gradient boosting on every pre-game feature (ratings, rest, quarterback changes, weather, total, spread)
     predicting the market residual, with shallow trees and strong regularization to limit overfitting."""
     from sklearn.ensemble import GradientBoostingRegressor
@@ -196,10 +197,10 @@ def walk_forward_boosted(features, first_test=FIRST_TEST_SEASON, last_test=LAST_
     for side in ('h', 'a'):
         data[f'{side}_net_epa'] = data[f'{side}_r_off_epa_pp'] - data[f'{side}_r_def_epa_pp']
     columns = FEATURES + ['total_line', 'wind', 'temp', 'dome', 'h_net_epa', 'a_net_epa', 'h_r_off_epa_pp', 'h_r_def_epa_pp',
-                          'a_r_off_epa_pp', 'a_r_def_epa_pp', 'h_qb_changed', 'a_qb_changed', 'h_games_played']
+                          'a_r_off_epa_pp', 'a_r_def_epa_pp', 'h_qb_changed', 'a_qb_changed', 'h_games_played'] + list(extra_columns)
     outputs = []
     for season in range(first_test, last_test + 1):
-        train = data[(data['season'] < season) & (data['season'] > FIRST_SEASON)]
+        train = data[(data['season'] < season) & (data['season'] > first_train)]
         test = data[data['season'] == season]
         if train.empty or test.empty:
             continue
@@ -252,9 +253,14 @@ def report(predictions, title, edge_bins):
     ats_summary(big, 'abs spread >= 3.5')
     for t in (2, 4, 6):
         ats_summary(big[big['abs_pred'] >= t], 'abs spread >= 3.5 & edge >= %d' % t)
-    print('by season, abs spread >= 3.5:')
-    for season, g in big.groupby('season'):
+    four_plus = predictions[predictions['abs_spread'] >= 4]
+    ats_summary(four_plus, 'abs spread >= 4')
+    for t in (1, 2, 4, 6):
+        ats_summary(four_plus[four_plus['abs_pred'] >= t], 'abs spread >= 4 & edge >= %d' % t)
+    print('by season, abs spread >= 4:')
+    for season, g in four_plus.groupby('season'):
         ats_summary(g, str(season))
+    return predictions
 
 
 def main():

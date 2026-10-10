@@ -27,13 +27,18 @@ python nfl_prod_projections.py
 - Covering Team and Result cells are shaded light green for a win and light red for a loss, and each week's games are boxed with a bold outline.
 - The Backtest ATS Win % column shows how often the model's pick covered against the market at that size of disagreement (2023-2025 backtest: about 54% under 3 points, 51% for 3-6, 43% for 6 or more). The model has not beaten the DraftKings/consensus lines in backtesting, and its biggest disagreements did worst, so treat the projections as information to weigh rather than picks to follow. The table behind the column is in O:P of the sheet and the numbers are `ATS_HIT_RATE_BY_EDGE` in the script.
 
+- The QB Injury Flag column (N) lists games where a team's previous starting quarterback is on this week's injury report (Out, Doubtful or Questionable) and games where the schedule expects a different starter than last week. It comes from the free nflverse injury reports, is refreshed on every run for games not yet played, and is kept as-is once a game has been played. It is information to read, not a signal the projections use: in backtesting it did not predict covers (see below).
+
 ## Research: can any model beat the closing spread?
 
-`nfl_research_ats.py` downloads free [nflverse](https://github.com/nflverse) data (`nflverse_data.py` caches it in `nfl/data_cache/`) and runs a walk-forward test: each season is predicted by a model trained only on earlier seasons, using closing spreads for 2012-2026 (about 3,600 games). It tests EPA team ratings, a regression like the production model on season-to-date yards and turnovers, and gradient boosting on every pre-game feature, and reports ATS win rates by season, edge size and spread size.
+`nfl_research_ats.py` downloads free [nflverse](https://github.com/nflverse) data (`nflverse_data.py` caches it in `nfl/data_cache/`) and runs a walk-forward test: each season is predicted by a model trained only on earlier seasons, using closing spreads for 2012-2026 (about 3,600 games). It tests EPA team ratings, a regression like the production model on season-to-date yards and turnovers, and gradient boosting on every pre-game feature, and reports ATS win rates by season, edge size and spread size (including spreads of 4 and up).
+
+`nfl_research_injuries.py` layers pre-game injury features from `nfl_injury_features.py` (quarterback status from the official reports, quarterback quality, and counts of players Out or Doubtful by position group) onto the same test and looks directly at games where a starting quarterback is out.
 
 ```
 cd nfl
 python nfl_research_ats.py
+python nfl_research_injuries.py
 ```
 
 ## Crypto bot

@@ -316,6 +316,10 @@ MANUAL_INPUT_COLUMNS = (6, 9, 13)
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
 # Widths of the edge/hit-rate lookup table columns; columns A-M are sized to their content on every write
 SPREADSHEET_COLUMN_WIDTHS = {'O': 14.0, 'P': 16.0}
+# Quarterback injury notes live in column N, outside SPREADSHEET_HEADERS so sheets from before it was added still load
+QB_FLAG_COLUMN = 14
+QB_FLAG_HEADER = 'QB Injury Flag'
+LAST_SHEET_COLUMN = QB_FLAG_COLUMN
 
 
 def fair_line_as_home(projected_difference):
@@ -384,7 +388,19 @@ def _new_projections_workbook():
         ws.cell(1, col).fill = manual_fill
 
     _write_hit_rate_table(ws)
+    _ensure_qb_flag_header(ws)
     return wb
+
+
+def _ensure_qb_flag_header(ws):
+    from openpyxl.styles import Alignment, Border, Font, Side
+
+    cell = ws.cell(1, QB_FLAG_COLUMN)
+    if cell.value != QB_FLAG_HEADER:
+        cell.value = QB_FLAG_HEADER
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        cell.border = Border(bottom=Side(style='medium'))
 
 
 def _write_hit_rate_table(ws):
@@ -517,8 +533,11 @@ def _autosize_columns(ws, records):
         width = max(content_width, header_width) + 3
         ws.column_dimensions[get_column_letter(col)].width = min(width, 60)
 
+    flag_lengths = [len(str(record['qb_flag'])) for record in records if record.get('qb_flag')]
+    ws.column_dimensions[get_column_letter(QB_FLAG_COLUMN)].width = min(max(flag_lengths, default=0) + 3, 90) if flag_lengths else 16
 
-def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None):
+
+def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook acts as a running log for the season: each run adds its week's games in week order, so
@@ -528,6 +547,8 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     that has since been played, using `actual_lookup` ({(week, year, home, away): difference}) plus the
     rows passed in. Blank spreads are filled from `spread_fetcher(year, week)` (DraftKings via Action
     Network in production); a spread already in the sheet is never replaced, and notes are never touched.
+    Games not yet played get a QB Injury Flag from `qb_flag_fetcher(year, week)` ({(home, away): text}),
+    refreshed every run since injury reports change through the week; played games keep their last flag.
     Layout follows the '2024 NFL Projections'
     workbook, with Notes moved to the far right; columns that need manual entry are highlighted and the
     rest are formulas.
@@ -547,6 +568,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     ws = wb.active
     _ensure_result_formatting(ws)
     _write_hit_rate_table(ws)
+    _ensure_qb_flag_header(ws)
 
     def week_value(week):
         return int(week) if str(week).isdigit() else week
@@ -578,6 +600,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'home': ws.cell(r, 3).value, 'away': ws.cell(r, 4).value,
             'fair_line': ws.cell(r, 5).value, 'spread': ws.cell(r, 6).value,
             'actual': ws.cell(r, 9).value, 'notes': ws.cell(r, 13).value,
+            'qb_flag': ws.cell(r, QB_FLAG_COLUMN).value,
         }
         key = game_key(record['week'], record['year'], record['home'], record['away'])
         existing_keys.add(key)
@@ -596,9 +619,22 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'week': week_value(row['week']), 'year': int(row['year']),
             'home': row['home_team'], 'away': row['away_team'],
             'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None,
-            'actual': actuals.get(key), 'notes': None,
+            'actual': actuals.get(key), 'notes': None, 'qb_flag': None,
         })
         added += 1
+
+    # Quarterback injury flags for games not yet played; reports change through the week so these refresh every run
+    if qb_flag_fetcher:
+        fetched_flags = {}
+        for record in records:
+            if record['actual'] not in (None, '') or not str(record['week']).isdigit():
+                continue
+            week_number = int(record['week'])
+            if week_number > get_last_regular_season_week(record['year']):
+                continue
+            if week_number not in fetched_flags:
+                fetched_flags[week_number] = qb_flag_fetcher(int(year), week_number)
+            record['qb_flag'] = fetched_flags[week_number].get((record['home'], record['away']))
 
     # Fill blank spreads from the sportsbook feed; a spread already in the sheet is never replaced
     spreads_filled = 0
@@ -626,7 +662,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     records.sort(key=season_order)
 
     for r in range(2, ws.max_row + 1):
-        for col in range(1, len(SPREADSHEET_HEADERS) + 1):
+        for col in range(1, LAST_SHEET_COLUMN + 1):
             ws.cell(r, col).value = None
 
     for r, record in enumerate(records, start=2):
@@ -645,6 +681,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         last_table_row = len(ATS_HIT_RATE_BY_EDGE) + 1
         ws.cell(r, 12, f'=IF(F{r}="","",LOOKUP(ABS(G{r}),$O$2:$O${last_table_row},$P$2:$P${last_table_row}))').number_format = '0%'
         ws.cell(r, 13, record['notes'])
+        ws.cell(r, QB_FLAG_COLUMN, record['qb_flag'])
         for col in MANUAL_INPUT_COLUMNS:
             ws.cell(r, col).fill = manual_fill
 
@@ -652,10 +689,10 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         week_group = season_order(record)
         is_first = r == 2 or season_order(records[r - 3]) != week_group
         is_last = r == len(records) + 1 or season_order(records[r - 1]) != week_group
-        for col in range(1, len(SPREADSHEET_HEADERS) + 1):
+        for col in range(1, LAST_SHEET_COLUMN + 1):
             ws.cell(r, col).border = Border(
                 left=week_outline if col == 1 else None,
-                right=week_outline if col == len(SPREADSHEET_HEADERS) else None,
+                right=week_outline if col == LAST_SHEET_COLUMN else None,
                 top=week_outline if is_first else None,
                 bottom=week_outline if is_last else None,
             )
@@ -663,6 +700,27 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     _autosize_columns(ws, records)
     wb.save(output_path)
     return output_path, added, actuals_updated, spreads_filled
+
+
+def fetch_qb_injury_flags(year, week):
+    """Quarterback injury notes for one week's games from nflverse injury reports, or {} if unavailable.
+
+    Downloads fresh schedule and injury files once per run, since the reports update through the week.
+    See nfl_injury_features.qb_injury_flags for exactly what gets flagged.
+    """
+    global _qb_flag_data
+    try:
+        if _qb_flag_data.get('year') != year:
+            from nflverse_data import load_games, load_injuries
+            _qb_flag_data = {'year': year, 'games': load_games(refresh=True), 'injuries': load_injuries(year, year, refresh=True)}
+        from nfl_injury_features import qb_injury_flags
+        return qb_injury_flags(_qb_flag_data['games'], _qb_flag_data['injuries'], year, week)
+    except Exception as e:
+        logging.warning(f"Could not load quarterback injury data for {year} week {week}: {e}")
+        return {}
+
+
+_qb_flag_data = {}
 
 
 def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
@@ -1025,7 +1083,8 @@ def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_
     }
     try:
         output_path, rows_added, actuals_updated, spreads_filled = write_projections_spreadsheet(
-            final_rows, predict_year, actual_lookup=actual_lookup, spread_fetcher=fetch_draftkings_spreads
+            final_rows, predict_year, actual_lookup=actual_lookup, spread_fetcher=fetch_draftkings_spreads,
+            qb_flag_fetcher=fetch_qb_injury_flags
         )
         logging.info(
             f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "
