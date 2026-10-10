@@ -16,8 +16,13 @@ def _cached_download(url, filename, refresh=False):
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, filename)
     if refresh or not os.path.exists(path):
-        response = requests.get(url, timeout=60)
-        response.raise_for_status()
+        try:
+            response = requests.get(url, timeout=60)
+            response.raise_for_status()
+        except requests.RequestException:
+            if os.path.exists(path):
+                return path  # offline or the file is missing upstream: fall back to the last copy
+            raise
         with open(path, 'wb') as f:
             f.write(response.content)
     return path
@@ -44,10 +49,12 @@ def load_player_weeks(first_season, last_season, refresh=False):
 
 
 def _load_seasons(url_template, filename_template, first_season, last_season, refresh):
+    """Cached per-season files; `refresh` re-downloads only the latest season, `refresh='all'` every season."""
     frames = []
     for season in range(first_season, last_season + 1):
+        force = refresh == 'all' or (bool(refresh) and season == last_season)
         try:
-            path = _cached_download(url_template.format(year=season), filename_template.format(year=season), refresh)
+            path = _cached_download(url_template.format(year=season), filename_template.format(year=season), force)
         except requests.RequestException:
             continue
         frames.append(pd.read_csv(path, low_memory=False))
