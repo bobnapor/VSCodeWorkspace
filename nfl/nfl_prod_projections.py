@@ -388,7 +388,45 @@ def _load_or_create_projections_workbook(output_path):
     return _new_projections_workbook()
 
 
-def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None):
+DRAFTKINGS_BOOK_ID = 68  # "DK NJ" on Action Network
+ACTION_NETWORK_SCOREBOARD_URL = 'https://api.actionnetwork.com/web/v2/scoreboard/nfl'
+
+
+def fetch_draftkings_spreads(year, week, max_retries=3):
+    """DraftKings point spreads for one regular-season week, from Action Network's public scoreboard feed.
+
+    Returns {(home_team, away_team): spread as home} where a negative number means the home team is favored,
+    matching the Spread column. Past weeks return the closing line. Returns {} when the feed is unavailable
+    or has no DraftKings lines (Action Network only has them for recent seasons), so the sheet is left blank.
+    """
+    params = {'bookIds': DRAFTKINGS_BOOK_ID, 'season': year, 'week': week}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(ACTION_NETWORK_SCOREBOARD_URL, params=params, headers=headers, timeout=30)
+            response.raise_for_status()
+            games = response.json().get('games', [])
+            break
+        except (requests.RequestException, ValueError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))
+            else:
+                logging.warning(f"Could not fetch DraftKings spreads for {year} week {week}: {e}")
+                return {}
+
+    spreads = {}
+    for game in games:
+        names = {team['id']: team['full_name'] for team in game.get('teams', [])}
+        home = names.get(game.get('home_team_id'))
+        away = names.get(game.get('away_team_id'))
+        lines = game.get('markets', {}).get(str(DRAFTKINGS_BOOK_ID), {}).get('event', {}).get('spread', [])
+        home_line = next((line['value'] for line in lines if line.get('side') == 'home'), None)
+        if home and away and home_line is not None:
+            spreads[(home, away)] = float(home_line)
+    return spreads
+
+
+def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook acts as a running log for the season: each run adds its week's games in week order, so
@@ -396,11 +434,13 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     A game already in the sheet (same week, year and teams) keeps its original fair line, since
     that is the line that was bet on. Actual score differences are refreshed for every game in the sheet
     that has since been played, using `actual_lookup` ({(week, year, home, away): difference}) plus the
-    rows passed in. Spread and notes are never touched. Layout follows the '2024 NFL Projections'
+    rows passed in. Blank spreads are filled from `spread_fetcher(year, week)` (DraftKings via Action
+    Network in production); a spread already in the sheet is never replaced, and notes are never touched.
+    Layout follows the '2024 NFL Projections'
     workbook, with Notes moved to the far right; columns that need manual entry are highlighted and the
     rest are formulas.
 
-    Returns (output_path, rows_added, actuals_updated).
+    Returns (output_path, rows_added, actuals_updated, spreads_filled).
     """
     from openpyxl.styles import PatternFill
 
@@ -465,6 +505,23 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         })
         added += 1
 
+    # Fill blank spreads from the sportsbook feed; a spread already in the sheet is never replaced
+    spreads_filled = 0
+    if spread_fetcher:
+        fetched_weeks = {}
+        for record in records:
+            if record['spread'] not in (None, '') or not str(record['week']).isdigit():
+                continue
+            week_number = int(record['week'])
+            if week_number > get_last_regular_season_week(record['year']):
+                continue
+            if week_number not in fetched_weeks:
+                fetched_weeks[week_number] = spread_fetcher(int(year), week_number)
+            line = fetched_weeks[week_number].get((record['home'], record['away']))
+            if line is not None:
+                record['spread'] = line
+                spreads_filled += 1
+
     def season_order(record):
         week_number = translate_week_number(str(record['week']), record['year'])
         return (int(record['year']), week_number if week_number is not None else 99)
@@ -496,7 +553,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             ws.cell(r, col).fill = manual_fill
 
     wb.save(output_path)
-    return output_path, added, actuals_updated
+    return output_path, added, actuals_updated, spreads_filled
 
 
 def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
@@ -858,10 +915,13 @@ def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_
         for g in played_games.itertuples()
     }
     try:
-        output_path, rows_added, actuals_updated = write_projections_spreadsheet(
-            final_rows, predict_year, actual_lookup=actual_lookup
+        output_path, rows_added, actuals_updated, spreads_filled = write_projections_spreadsheet(
+            final_rows, predict_year, actual_lookup=actual_lookup, spread_fetcher=fetch_draftkings_spreads
         )
-        logging.info(f"Projections spreadsheet updated: {output_path} ({rows_added} games added, {actuals_updated} actual differences updated)")
+        logging.info(
+            f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "
+            f"{actuals_updated} actual differences updated, {spreads_filled} DraftKings spreads filled in)"
+        )
     except Exception as e:
         logging.error(f"Could not write projections spreadsheet: {e}")
 
