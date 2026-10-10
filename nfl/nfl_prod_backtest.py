@@ -1,7 +1,7 @@
 """
 NFL Picks Backtest Script (Web Version)
 
-This script imports core functions from nflpicks_v2_0_multithreaded_web.py
+This script imports core functions from nfl_prod_projections.py
 to ensure consistency between predictions and backtesting.
 """
 
@@ -17,8 +17,8 @@ from datetime import datetime
 import time
 
 # Import core functions from the main prediction script
-import nflpicks_v2_0_multithreaded_web as picks_web
-from nflpicks_v2_0_multithreaded_web import (
+import nfl_prod_projections as picks_web
+from nfl_prod_projections import (
     load_data_for_year,
     preprocess_data,
     predict_game,

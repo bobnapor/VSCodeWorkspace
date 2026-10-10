@@ -297,7 +297,7 @@ def load_data_for_year(year, off_url, def_url, games_url, use_web=True):
 
 PROJECTION_HEADER = "Game|Week|Year|Home|Away|Mean|FairLine(Home)|StdDev|Actual"
 
-# Std dev of (predicted - actual) home margin from nflpicks_backtest_web.py over 2022-2025 regular seasons
+# Std dev of (predicted - actual) home margin from nfl_prod_backtest.py over 2022-2025 regular seasons
 # (1084 games, 200 runs per season, prior-season stats only so a game's result is never in its features).
 # Used to turn a points edge into a cover probability.
 NFL_MARGIN_STD_DEV = 13.9
@@ -336,18 +336,11 @@ def get_desktop_path():
     return buf.value
 
 
-def write_projections_spreadsheet(rows, year, output_dir=None):
-    """Write final projections to <Desktop>/<year>_nfl_projections.xlsx.
-
-    Layout follows the '2024 NFL Projections' workbook, with Notes moved to the far right. Columns
-    that need manual entry (spread, actual score difference, notes) are highlighted and left blank,
-    and the remaining columns are formulas.
-    """
+def _new_projections_workbook():
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
     manual_fill = PatternFill(fill_type='solid', start_color=MANUAL_INPUT_FILL_COLOR, end_color=MANUAL_INPUT_FILL_COLOR)
-
     wb = Workbook()
     ws = wb.active
     ws.title = 'Sheet1'
@@ -361,29 +354,6 @@ def write_projections_spreadsheet(rows, year, output_dir=None):
     ws.row_dimensions[1].height = 29.5
     for letter, width in SPREADSHEET_COLUMN_WIDTHS.items():
         ws.column_dimensions[letter].width = width
-
-    def week_value(week):
-        return int(week) if str(week).isdigit() else week
-
-    for r, row in enumerate(rows, start=2):
-        ws.cell(r, 1, week_value(row['week']))
-        ws.cell(r, 2, int(row['year']))
-        ws.cell(r, 3, row['home_team'])
-        ws.cell(r, 4, row['away_team'])
-        ws.cell(r, 5, fair_line_as_home(float(row['projected']))).number_format = '0.0'
-        # F (spread), I (actual) and M (notes) are entered manually
-        ws.cell(r, 7, f'=E{r}+F{r}')
-        ws.cell(r, 8, f'=IF(G{r}>0,C{r},D{r})')
-        actual = row['actual']
-        # Unplayed games carry a placeholder difference of 0
-        if actual not in (0, None) and not pd.isna(actual):
-            ws.cell(r, 9, int(actual))
-        ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
-        ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
-        ws.cell(r, 12, f'=IF(F{r}="","",MAX(NORMSDIST(G{r}/$O$2),1-NORMSDIST(G{r}/$O$2)))').number_format = '0%'
-        for col in MANUAL_INPUT_COLUMNS:
-            ws.cell(r, col).fill = manual_fill
-
     for col in MANUAL_INPUT_COLUMNS:
         ws.cell(1, col).fill = manual_fill
 
@@ -391,12 +361,109 @@ def write_projections_spreadsheet(rows, year, output_dir=None):
     ws['O1'].font = Font(bold=True)
     ws['O1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     ws['O2'] = NFL_MARGIN_STD_DEV
+    return wb
+
+
+def _load_or_create_projections_workbook(output_path):
+    """Open the existing year workbook, or start a new one.
+
+    An existing file whose header row doesn't match the current layout is copied to a timestamped
+    backup instead of being appended to, so older layouts are never corrupted.
+    """
+    import shutil
+    from openpyxl import load_workbook
+
+    if not os.path.exists(output_path):
+        return _new_projections_workbook()
+
+    wb = load_workbook(output_path)
+    ws = wb.active
+    headers = [ws.cell(1, col).value for col in range(1, len(SPREADSHEET_HEADERS) + 1)]
+    if headers == SPREADSHEET_HEADERS:
+        return wb
+
+    backup_path = output_path.replace('.xlsx', f'_old_layout_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+    shutil.copy2(output_path, backup_path)
+    logging.warning(f"{output_path} has a different layout; copied it to {backup_path} and starting a new sheet")
+    return _new_projections_workbook()
+
+
+def write_projections_spreadsheet(rows, year, output_dir=None):
+    """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
+
+    The workbook acts as a running log for the season: each run adds its week's games below the earlier
+    weeks. A game already in the sheet (same week, year and teams) has its fair line refreshed, and its
+    actual score difference filled in if it was blank, but hand-entered values (spread, actual, notes)
+    are never overwritten. Layout follows the '2024 NFL Projections' workbook, with Notes moved to the
+    far right; columns that need manual entry are highlighted and the rest are formulas.
+
+    Returns (output_path, rows_added, rows_updated).
+    """
+    from openpyxl.styles import PatternFill
+
+    manual_fill = PatternFill(fill_type='solid', start_color=MANUAL_INPUT_FILL_COLOR, end_color=MANUAL_INPUT_FILL_COLOR)
 
     output_dir = output_dir or get_desktop_path()
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f'{year}_nfl_projections.xlsx')
+
+    wb = _load_or_create_projections_workbook(output_path)
+    ws = wb.active
+
+    def week_value(week):
+        return int(week) if str(week).isdigit() else week
+
+    def game_key(week, game_year, home, away):
+        return (str(week_value(week)), str(game_year), home, away)
+
+    existing_rows = {}
+    last_row = 1
+    for r in range(2, ws.max_row + 1):
+        if ws.cell(r, 3).value:
+            existing_rows[game_key(ws.cell(r, 1).value, ws.cell(r, 2).value, ws.cell(r, 3).value, ws.cell(r, 4).value)] = r
+            last_row = r
+
+    def played_actual(row):
+        # Unplayed games carry a placeholder difference of 0
+        actual = row['actual']
+        return None if actual in (0, None) or pd.isna(actual) else int(actual)
+
+    added = updated = 0
+    for row in rows:
+        fair_line = fair_line_as_home(float(row['projected']))
+        actual = played_actual(row)
+        key = game_key(row['week'], row['year'], row['home_team'], row['away_team'])
+
+        if key in existing_rows:
+            r = existing_rows[key]
+            ws.cell(r, 5, fair_line)
+            if actual is not None and ws.cell(r, 9).value in (None, ''):
+                ws.cell(r, 9, actual)
+            updated += 1
+            continue
+
+        last_row += 1
+        r = last_row
+        ws.cell(r, 1, week_value(row['week']))
+        ws.cell(r, 2, int(row['year']))
+        ws.cell(r, 3, row['home_team'])
+        ws.cell(r, 4, row['away_team'])
+        ws.cell(r, 5, fair_line).number_format = '0.0'
+        # F (spread), I (actual) and M (notes) are entered manually
+        ws.cell(r, 7, f'=E{r}+F{r}')
+        ws.cell(r, 8, f'=IF(G{r}>0,C{r},D{r})')
+        if actual is not None:
+            ws.cell(r, 9, actual)
+        ws.cell(r, 10, f'=IF(OR(F{r}="",I{r}=""),"",IF(I{r}+F{r}=0,"Push",IF((I{r}+F{r})>0,C{r},D{r})))')
+        ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
+        ws.cell(r, 12, f'=IF(F{r}="","",MAX(NORMSDIST(G{r}/$O$2),1-NORMSDIST(G{r}/$O$2)))').number_format = '0%'
+        for col in MANUAL_INPUT_COLUMNS:
+            ws.cell(r, col).fill = manual_fill
+        existing_rows[key] = r
+        added += 1
+
     wb.save(output_path)
-    return output_path
+    return output_path, added, updated
 
 
 def get_projection_measures(averaged_predictions, all_predictions, num_runs, game_details):
@@ -752,8 +819,8 @@ def main(num_runs, predict_year=None, predict_week=None, use_web=True, lookback_
                 'actual': info['actual_score_difference'],
             })
     try:
-        output_path = write_projections_spreadsheet(final_rows, predict_year)
-        logging.info(f"Projections spreadsheet written to: {output_path}")
+        output_path, rows_added, rows_updated = write_projections_spreadsheet(final_rows, predict_year)
+        logging.info(f"Projections spreadsheet updated: {output_path} ({rows_added} games added, {rows_updated} refreshed)")
     except Exception as e:
         logging.error(f"Could not write projections spreadsheet: {e}")
 

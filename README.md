@@ -4,7 +4,7 @@ Personal Python projects, one folder per area. Scripts import their siblings by 
 
 | Folder | Contents |
 |---|---|
-| [nfl/](nfl/) | NFL point-spread projections. `nflpicks_v2_0_multithreaded_web.py` is the current version; `nflpicks_backtest_web.py` backtests it. Older versions are kept alongside. |
+| [nfl/](nfl/) | NFL point-spread projections. The `nfl_prod_*` scripts are the production versions: `nfl_prod_projections.py` makes the weekly projections and `nfl_prod_backtest.py` backtests it. The `nflpicks*` scripts are older versions kept for reference. |
 | [mlb/](mlb/) | MLB picks, backtest and lines UI. |
 | [nba/](nba/) | NBA picks. |
 | [college/](college/) | College football and basketball picks. |
@@ -17,12 +17,12 @@ Personal Python projects, one folder per area. Scripts import their siblings by 
 
 ```
 cd nfl
-python nflpicks_v2_0_multithreaded_web.py
+python nfl_prod_projections.py
 ```
 
 - Year and week are detected automatically; set `PREDICT_YEAR` / `PREDICT_WEEK` in the `__main__` block to override.
 - pro-football-reference blocks scripted requests, so pages saved from a browser into `C:/Users/Bobby/Downloads/NFL_Stats/` are used as a fallback.
-- Results are logged and written to `<year>_nfl_projections.xlsx` on the Desktop.
+- Results are logged and appended to `<year>_nfl_projections.xlsx` on the Desktop. Each run adds its week below the earlier weeks; re-running a week refreshes its fair lines without touching the spread, actual and notes you entered.
 
 ## Crypto bot
 
