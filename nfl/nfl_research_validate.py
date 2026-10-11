@@ -74,6 +74,10 @@ def annotate(frame):
     return f
 
 
+def rate(win):
+    return '%.3f (n=%d)' % (win.mean(), len(win)) if len(win) else '   -        '
+
+
 def summary(label, g, seasons):
     n = len(g)
     if n == 0:
@@ -342,6 +346,212 @@ def wong_teasers(table):
             era, l['leg_win'].mean(), len(l), len(l) / l['season'].nunique(), parts, l['leg_win'].mean() ** 2))
 
 
+def bad_underdogs(table):
+    """Pre-registered test of 'don't back pathetic teams': do the model's underdog picks on very bad teams cover less than
+    its other underdog picks, in every era?  Bad = the underdog's pre-game Elo is in the league's bottom 15% that week
+    (about the worst five teams); also reported: a season-to-date record of .250 or worse after 3+ games."""
+    import nfl_model as nm
+
+    hist = nfl_signal.scored_history(table, int(table['season'].max()))
+    elo = nm.add_elo(table)[['game_id', 'h_elo', 'a_elo']]
+    weekly = pd.concat([table[['game_id', 'season', 'week']].merge(elo, on='game_id').rename(columns={'h_elo': 'elo'})[['season', 'week', 'elo']],
+                        table[['game_id', 'season', 'week']].merge(elo, on='game_id').rename(columns={'a_elo': 'elo'})[['season', 'week', 'elo']]])
+    cutoff = weekly.groupby(['season', 'week'])['elo'].quantile(0.15).rename('elo_cut').reset_index()
+    f = hist.merge(elo, on='game_id').merge(cutoff, on=['season', 'week'])
+    # season-to-date records before each game
+    long = pd.concat([table[['game_id', 'season', 'gameday', 'game_type', 'home_team', 'result']].rename(columns={'home_team': 'team'}).assign(m=lambda d: d['result']),
+                      table[['game_id', 'season', 'gameday', 'game_type', 'away_team', 'result']].rename(columns={'away_team': 'team'}).assign(m=lambda d: -d['result'])])
+    long = long[long['game_type'] == 'REG'].sort_values(['team', 'season', 'gameday'])
+    long['w'] = (long['m'] > 0).astype(float) + 0.5 * (long['m'] == 0)
+    long['g'] = long['m'].notna().astype(float)
+    grp = long.groupby(['team', 'season'])
+    long['pre_w'], long['pre_g'] = grp['w'].cumsum() - long['w'], grp['g'].cumsum() - long['g']
+    rec = long[['game_id', 'team', 'pre_w', 'pre_g']]
+    f = f[f['week'].between(*WEEKS) & (f['resid'] != 0) & (f['spread_line'] != 0) & (f['game_type'] == 'REG')].copy()
+    dog_home = f['spread_line'] < 0
+    f['dog_team'] = np.where(dog_home, f['home_team'], f['away_team'])
+    f = f.merge(rec.rename(columns={'team': 'dog_team'}), on=['game_id', 'dog_team'], how='left')
+    dog_home = f['spread_line'] < 0
+    f['toward_dog'] = np.where(dog_home, f['pred'], -f['pred'])
+    f['win'] = np.where(dog_home, f['resid'] > 0, f['resid'] < 0)
+    f['dog_elo'] = np.where(dog_home, f['h_elo'], f['a_elo'])
+    f['bad_elo'] = f['dog_elo'] <= f['elo_cut']
+    f['bad_record'] = (f['pre_g'] >= 3) & (f['pre_w'] / f['pre_g'].where(f['pre_g'] > 0) <= 0.25)
+    picks = f[f['toward_dog'] > 0]
+    print('\n=== the model\'s underdog picks on very bad teams vs the rest (weeks 5-16) ===')
+    for era, mask in (('1999-2005 (untouched)', picks['season'] <= 2005), ('2006-2017', picks['season'].between(2006, 2017)), ('2018-2026', picks['season'] >= 2018)):
+        g = picks[mask]
+        print('  %-22s bottom-15%% Elo underdog %s | other underdogs %s || record .250 or worse %s | others %s' % (
+            era, rate(g[g['bad_elo']]['win']), rate(g[~g['bad_elo']]['win']), rate(g[g['bad_record']]['win']), rate(g[~g['bad_record']]['win'])))
+    allbad, allother = picks[picks['bad_elo']], picks[~picks['bad_elo']]
+    print('  all eras: bottom-15%% Elo underdog %s | others %s' % (rate(allbad['win']), rate(allother['win'])))
+    both = picks[picks['bad_elo'] & (np.where(picks['spread_line'] < 0, picks['a_elo'], picks['h_elo']) <= picks['elo_cut'])]
+    print('  both teams bottom-15%% Elo (like TEN-HOU this week?): %s' % rate(both['win']))
+    nopick = f[(f['toward_dog'] <= 0) & f['bad_elo']]
+    print('  for reference, bad underdogs the model did NOT pick: they covered %s' % rate(nopick['win']))
+
+
+def training_windows(table):
+    """Pre-registered: does fitting on only the most recent seasons (the owner's 5-season habit) beat 14?
+
+    Correction model: information and hit rates by side in all three eras for windows of 3, 5, 8, 10 and 14 seasons;
+    the untouched 1999-2005 seasons are scored by a model fitted on the w seasons from 2006.  Adopt 5 only if it beats
+    14 in every era.  Projection model: average miss of the projected margin (weeks 5-16) for windows of 3, 5, 8 and 12.
+    """
+    import nfl_model as nm
+
+    fit = lab.ridge_margin(nfl_signal.SIGNAL_FEATURES, alpha=nfl_signal.SIGNAL_ALPHA, target='resid')
+    played = table[table['result'].notna() & (table['game_type'] == 'REG')]
+    print('\n=== training window for the pick model (correlation with the cover margin; underdog / favorite side hit rates) ===')
+    for window in (3, 5, 8, 10, 14):
+        fwd = lab.walk_forward(table, fit, window=window)
+        train = played[played['season'].between(2006, 2006 + window - 1)]
+        back = []
+        for season in range(1999, 2006):
+            test = lab.test_games(table, season)
+            out = test.copy()
+            out['pred'] = np.asarray(fit(train, test), dtype=float)
+            back.append(out)
+        cells = []
+        for era, f in (('1999-2005', pd.concat(back)), ('2006-2017', fwd[fwd['season'] <= 2017]), ('2018-2026', fwd[fwd['season'] > 2017])):
+            f = f[f['week'].between(*WEEKS) & (f['resid'] != 0) & (f['spread_line'] != 0)]
+            win = np.where(f['pred'] > 0, f['resid'] > 0, f['resid'] < 0)
+            toward = np.where(f['spread_line'] < 0, f['pred'], -f['pred'])
+            cells.append('%s r=%.3f dogs %.3f favs %.3f' % (era, np.corrcoef(f['pred'], f['resid'])[0, 1], win[toward > 0].mean(), win[toward < 0].mean()))
+        print('  %2d seasons: %s' % (window, ' | '.join(cells)))
+
+    print('\n=== training window for the projection model (average miss of the projected margin, weeks 5-16) ===')
+    t = nm.load_game_table(refresh=False)
+    cols = nm.feature_columns(nm.PRODUCTION_METRICS, use_qb=True, use_elo=True)
+    for window in (3, 5, 8, 12):
+        rows = []
+        for season in range(2015, 2026):
+            for week in range(5, 17):
+                games = t[(t['season'] == season) & (t['week'] == week) & t['result'].notna() & (t['game_type'] == 'REG')]
+                if games.empty:
+                    continue
+                train = nm.training_frame(t, season, before_week=week, seasons=window)
+                pred = nm.predict(nm.fit(train, cols), games)
+                rows.append(pd.DataFrame({'season': season, 'err': np.abs(pred - games['result'].to_numpy()),
+                                          'market': np.abs(games['spread_line'].to_numpy() - games['result'].to_numpy())}))
+        e = pd.concat(rows)
+        print('  %2d seasons: model %.3f points (2015-2020 %.3f, 2021-2025 %.3f); closing line %.3f' % (
+            window, e['err'].mean(), e[e['season'] <= 2020]['err'].mean(), e[e['season'] > 2020]['err'].mean(), e['market'].mean()))
+    print('  (the projection model only trains on seasons from %d, so 12-season windows are shorter before %d)' % (
+        nm.TRAIN_FIRST_SEASON, nm.TRAIN_FIRST_SEASON + 12))
+
+
+def components(table):
+    """Diagnostic: the correction model's information from its offense ratings alone and its defense ratings alone, by era,
+    and the sign of the defensive success-allowed coefficients when fitted on each era separately."""
+    off_cols = [c for c in nfl_signal.SIGNAL_FEATURES if c.startswith('off__')] + lab.BASIC_CONTEXT
+    def_cols = [c for c in nfl_signal.SIGNAL_FEATURES if c.startswith('def__')] + lab.BASIC_CONTEXT
+    print('\n=== which half of the model carries the information (correlation with the cover margin, weeks 5-16) ===')
+    for name, cols in (('offense ratings only', off_cols), ('defense ratings only', def_cols), ('full model', nfl_signal.SIGNAL_FEATURES)):
+        fit = lab.ridge_margin(cols, alpha=nfl_signal.SIGNAL_ALPHA, target='resid')
+        fwd = lab.walk_forward(table, fit)
+        played = table[table['result'].notna() & (table['game_type'] == 'REG')]
+        train = played[played['season'].between(2006, 2019)]
+        back = []
+        for season in range(1999, 2006):
+            test = lab.test_games(table, season)
+            out = test.copy()
+            out['pred'] = np.asarray(fit(train, test), dtype=float)
+            back.append(out)
+        cells = []
+        for era, f in (('1999-2005', pd.concat(back)), ('2006-2017', fwd[fwd['season'] <= 2017]), ('2018-2026', fwd[fwd['season'] > 2017])):
+            f = f[f['week'].between(*WEEKS) & (f['resid'] != 0) & (f['spread_line'] != 0)]
+            win = np.where(f['pred'] > 0, f['resid'] > 0, f['resid'] < 0)
+            toward = np.where(f['spread_line'] < 0, f['pred'], -f['pred'])
+            cells.append('%s r=%.3f dogs %.3f' % (era, np.corrcoef(f['pred'], f['resid'])[0, 1], win[toward > 0].mean()))
+        print('  %-22s %s' % (name, ' | '.join(cells)))
+
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import StandardScaler
+    watch = ['def__o_comp_success', 'def__o_success', 'def__o_early_success', 'def__o_success_pass', 'off__o_drives', 'off__o_success_rush']
+    print('\n  coefficients fitted on each era alone (points of cover margin per SD; positive = that team covers more as the rating rises):')
+    played = table[table['result'].notna() & (table['game_type'] == 'REG') & table['week'].between(1, 17)]
+    for era, lo, hi in (('1999-2005', 1999, 2005), ('2006-2012', 2006, 2012), ('2013-2019', 2013, 2019), ('2020-2025', 2020, 2025)):
+        tr = played[played['season'].between(lo, hi)]
+        usable = [c for c in nfl_signal.SIGNAL_FEATURES if tr[c].std() > 1e-6]
+        fill = tr[usable].median()
+        x = StandardScaler().fit_transform(tr[usable].fillna(fill))
+        coef = pd.Series(Ridge(alpha=nfl_signal.SIGNAL_ALPHA).fit(x, tr['resid']).coef_, index=usable)
+        print('    %s: %s' % (era, '  '.join('%s %+.3f' % (c.replace('def__o_', 'D:').replace('off__o_', 'O:'), coef.get(c, np.nan)) for c in watch)))
+
+
+def stable_ridge(columns, alpha=nfl_signal.SIGNAL_ALPHA, target='resid'):
+    """Ridge on only the features whose effect points the same way in both halves of the training seasons.
+
+    Inside each fit: the training seasons are split into an earlier and a later half, a ridge is fitted on each, and a
+    feature is kept only if its two coefficients have the same sign; the final ridge is fitted on all training games with
+    the kept features.  Nothing from the test season is used.  Returns (fit_predict, kept-columns log).
+    """
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import StandardScaler
+
+    kept_log = {}
+
+    def coefficients(frame, cols):
+        fill = frame[cols].median()
+        x = StandardScaler().fit_transform(frame[cols].fillna(fill))
+        return pd.Series(Ridge(alpha=alpha).fit(x, frame[target]).coef_, index=cols)
+
+    def fit_predict(train, test):
+        usable = [c for c in columns if train[c].std() > 1e-6]
+        seasons = sorted(train['season'].unique())
+        early, late = seasons[:len(seasons) // 2], seasons[len(seasons) // 2:]
+        a = coefficients(train[train['season'].isin(early)], usable)
+        b = coefficients(train[train['season'].isin(late)], usable)
+        keep = [c for c in usable if np.sign(a[c]) == np.sign(b[c]) and a[c] != 0]
+        kept_log[int(test['season'].iloc[0])] = keep
+        return lab.ridge_margin(keep, alpha=alpha, target=target)(train, test)
+
+    return fit_predict, kept_log
+
+
+def stability_test(table):
+    """Pre-registered: adopt the sign-stable model only if its correlation with the cover margin beats production in all
+    three eras; report hit rates by side and what it says about this week's Tennessee-Houston game."""
+    played = table[table['result'].notna() & (table['game_type'] == 'REG')]
+    train_back = played[played['season'].between(2006, 2019)]
+    print('\n=== sign-stable features vs production (weeks 5-16) ===')
+    results = {}
+    for name in ('production', 'sign-stable features'):
+        if name == 'production':
+            fit, kept = lab.ridge_margin(nfl_signal.SIGNAL_FEATURES, alpha=nfl_signal.SIGNAL_ALPHA, target='resid'), None
+        else:
+            fit, kept = stable_ridge(nfl_signal.SIGNAL_FEATURES)
+        fwd = lab.walk_forward(table, fit)
+        back = []
+        for season in range(1999, 2006):
+            test = lab.test_games(table, season)
+            out = test.copy()
+            out['pred'] = np.asarray(fit(train_back, test), dtype=float)
+            back.append(out)
+        cells, r = [], {}
+        for era, f in (('1999-2005', pd.concat(back)), ('2006-2017', fwd[fwd['season'] <= 2017]), ('2018-2026', fwd[fwd['season'] > 2017])):
+            f = f[f['week'].between(*WEEKS) & (f['resid'] != 0) & (f['spread_line'] != 0)]
+            win = np.where(f['pred'] > 0, f['resid'] > 0, f['resid'] < 0)
+            toward = np.where(f['spread_line'] < 0, f['pred'], -f['pred'])
+            r[era] = np.corrcoef(f['pred'], f['resid'])[0, 1]
+            cells.append('%s r=%.3f dogs %s favs %s' % (era, r[era], rate(pd.Series(win[toward > 0])), rate(pd.Series(win[toward < 0]))))
+        results[name] = r
+        print('  %-22s %s' % (name, ' | '.join(cells)))
+        if kept is not None:
+            sizes = {s: len(c) for s, c in kept.items()}
+            print('  features kept per fit: %d-%d of %d' % (min(sizes.values()), max(sizes.values()), len(nfl_signal.SIGNAL_FEATURES)))
+            this_season = kept.get(int(table['season'].max()), [])
+            dropped = [c for c in nfl_signal.SIGNAL_FEATURES if c not in this_season]
+            print('  dropped for %d: %s' % (int(table['season'].max()), ', '.join(dropped)))
+        game = table[(table['season'] == 2026) & (table['week'] == 5) & (table['home_team'] == 'TEN')]
+        if len(game):
+            train = lab.training_games(table, 2026)
+            print('  this week, Houston at Tennessee: correction toward Tennessee %+.2f' % float(np.asarray(fit(train, game))[0]))
+    adopt = all(results['sign-stable features'][e] > results['production'][e] for e in results['production'])
+    print('  verdict: %s' % ('ADOPT: better in every era' if adopt else 'keep production: not better in every era'))
+
+
 def main():
     table = add_qb_change(lab.default_table())
     forward = annotate(lab.walk_forward(table, lab.ridge_margin(nfl_signal.SIGNAL_FEATURES, alpha=nfl_signal.SIGNAL_ALPHA, target='resid')))
@@ -425,5 +635,13 @@ if __name__ == '__main__':
         coefficients(t)
     elif 'teasers' in sys.argv[1:]:
         wong_teasers(lab.default_table())
+    elif 'bad' in sys.argv[1:]:
+        bad_underdogs(lab.default_table())
+    elif 'window' in sys.argv[1:]:
+        training_windows(lab.default_table())
+    elif 'components' in sys.argv[1:]:
+        components(lab.default_table())
+    elif 'stable' in sys.argv[1:]:
+        stability_test(lab.build_table(lab.ALL_PAIRS, refresh=False))
     else:
         main()
