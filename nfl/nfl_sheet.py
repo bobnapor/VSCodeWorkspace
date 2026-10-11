@@ -12,12 +12,10 @@ from datetime import datetime
 import pandas as pd
 import requests
 
-# How often the model's pick covered against closing spreads in nfl_research_model.py (walk-forward, 2014-2026
-# regular seasons, 3,132 games, pushes excluded). Each pair is (smallest edge in points, ATS win rate for edges
-# from there to the next row). Every band sits near 50%, and break-even at -110 is 52.4%, so these are hit
-# rates and not probabilities of covering.
-ATS_HIT_RATE_BY_EDGE = ((-99, 0.51), (0, 0.53), (0.25, 0.53), (0.5, 0.58), (1, 0.58))
+# The table behind the Backtest ATS Win % column (how often the model's side covered, by size of the correction toward
+# the underdog) is computed each run by nfl_signal.backtest_hit_rates and written to the sheet; nothing is typed in.
 HIT_RATE_HEADER = 'Backtest ATS Win % (at this edge)'
+HIT_RATE_TABLE_ROWS = 5   # rows 2-6, just above the two settings
 
 # Column order: what you act on first (week, teams, spread, the pick), then the model's numbers, then the result,
 # with the long text (QB flags, notes) and the bookkeeping columns last so the sheet fits on one screen.
@@ -40,8 +38,9 @@ REQUIRED_FIELDS = ('week', 'year', 'home', 'away', 'fair_line', 'spread', 'actua
 MANUAL_INPUT_FIELDS = ('spread', 'actual', 'notes')
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
 # Settings and the edge/hit-rate lookup table sit one column to the right of the data
-TABLE_COLUMNS = (LAST_SHEET_COLUMN + 2, LAST_SHEET_COLUMN + 3)
+TABLE_COLUMNS = (LAST_SHEET_COLUMN + 2, LAST_SHEET_COLUMN + 3, LAST_SHEET_COLUMN + 4)   # correction from, cover rate, games
 TABLE_LETTERS = tuple(chr(64 + c) for c in TABLE_COLUMNS)
+TABLE_EDGE_HEADER = 'Correction toward underdog from'
 THRESHOLD_ROW = 7
 PICKS_ROW = 8
 THRESHOLD_LABEL = 'Signal threshold (pts)'
@@ -129,11 +128,25 @@ def _add_conditional_formatting(ws):
     )
 
 
-def _reset_sheet(ws, threshold, picks_per_week):
+def _hit_rate_table_from(ws):
+    """The cover-rate table the sheet already holds, [(correction from, cover rate, games)], for runs that can't recompute it.
+
+    Only rows that carry a game count are taken, which leaves out the typed-in tables older versions wrote.
+    """
+    for row in ws.iter_rows(min_row=1, max_row=1, max_col=40):
+        for cell in row:
+            if cell.value == TABLE_EDGE_HEADER:
+                rows = [tuple(ws.cell(r, cell.column + i).value for i in range(3)) for r in range(2, 2 + HIT_RATE_TABLE_ROWS)]
+                return [r for r in rows if isinstance(r[2], (int, float)) and isinstance(r[1], (int, float))]
+    return []
+
+
+def _reset_sheet(ws, threshold, picks_per_week, hit_rate_table, through_season):
     """Clear the sheet and lay out the header, settings table, formatting and panes from scratch.
 
     Rewriting it every run is what lets an older layout turn into the current one: the games were already read
     back by header text, and the formulas are written again for wherever the columns now are.
+    `hit_rate_table` is [(correction from, cover rate, games)] for the Backtest ATS Win % column.
     """
     from openpyxl.formatting.formatting import ConditionalFormattingList
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -153,20 +166,24 @@ def _reset_sheet(ws, threshold, picks_per_week):
         if key in MANUAL_INPUT_FIELDS:
             cell.fill = manual_fill
 
-    edge_col, rate_col = TABLE_COLUMNS
-    for col, title in ((edge_col, 'Correction toward underdog from'), (rate_col, 'Backtest ATS Win %')):
+    edge_col, rate_col, games_col = TABLE_COLUMNS
+    for col, title in ((edge_col, TABLE_EDGE_HEADER), (rate_col, 'Backtest ATS Win %'), (games_col, 'Games')):
         cell = ws.cell(1, col, title)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.border = Border(bottom=Side(style='medium'))
-    for r, (edge, hit_rate) in enumerate(ATS_HIT_RATE_BY_EDGE, start=2):
+    for r, (edge, hit_rate, games) in enumerate(hit_rate_table[:HIT_RATE_TABLE_ROWS], start=2):
         ws.cell(r, edge_col, edge)
-        ws.cell(r, rate_col, hit_rate).number_format = '0%'
+        ws.cell(r, rate_col, hit_rate).number_format = '0.0%'
+        ws.cell(r, games_col, games)
     # editable: the correction that flags an underdog on its own, and how many top underdogs a week are always flagged
     ws.cell(THRESHOLD_ROW, edge_col, THRESHOLD_LABEL).font = Font(bold=True)
     ws.cell(THRESHOLD_ROW, rate_col, threshold)
     ws.cell(PICKS_ROW, edge_col, PICKS_LABEL).font = Font(bold=True)
     ws.cell(PICKS_ROW, rate_col, picks_per_week)
+    if hit_rate_table:
+        ws.cell(PICKS_ROW + 2, edge_col, f'Table: walk-forward backtest, 2006-{through_season} regular seasons, recomputed every run. '
+                                          f'Break-even at -110 is 52.4%.').alignment = Alignment(wrap_text=False)
     _add_conditional_formatting(ws)
 
 
@@ -349,7 +366,7 @@ def _autosize_columns(ws, records):
             width = max(min(width, MAX_NOTES_WIDTH), MIN_NOTES_WIDTH)
         widths[key] = width
         ws.column_dimensions[get_column_letter(col)].width = width
-    for col, width in zip(TABLE_COLUMNS, (24.0, 14.0)):
+    for col, width in zip(TABLE_COLUMNS, (24.0, 14.0, 8.0)):
         ws.column_dimensions[get_column_letter(col)].width = width
 
     # Header row tall enough for the longest wrapped header; data rows tall enough for wrapped flags and notes
@@ -365,7 +382,8 @@ def _autosize_columns(ws, records):
             ws.row_dimensions[r].height = 15 * lines
 
 
-def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None):
+def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None,
+                                  hit_rate_table=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook acts as a running log for the season: each run adds its week's games in week order, so
@@ -398,6 +416,8 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     ws = wb.active
     threshold, picks_per_week = _settings_from(ws)
     fields = _field_columns(ws)
+    # a table that couldn't be recomputed this run keeps what the sheet already holds
+    hit_rate_table = [r for r in (hit_rate_table or []) if r[1] is not None] or _hit_rate_table_from(ws)
 
     def week_value(week):
         return int(week) if str(week).isdigit() else week
@@ -506,15 +526,15 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     # within a week keep the order they were first written in
     records.sort(key=season_order)
 
-    _reset_sheet(ws, threshold, picks_per_week)
+    _reset_sheet(ws, threshold, picks_per_week, hit_rate_table, int(year))
 
     from openpyxl.styles import Alignment
 
     centered = ('week', 'year', 'spread', 'dog_correction', 'hit_rate', 'fair_line', 'fair_vs_spread', 'actual', 'result', 'correction')
     wrapped = ('qb_flag', 'notes')
     week_range, year_range, dog_range = (f'${LETTER[key]}$2:${LETTER[key]}${FORMAT_LAST_ROW}' for key in ('week', 'year', 'dog_correction'))
-    edge_letter, rate_letter = TABLE_LETTERS
-    last_table_row = len(ATS_HIT_RATE_BY_EDGE) + 1
+    edge_letter, rate_letter = TABLE_LETTERS[:2]
+    last_table_row = HIT_RATE_TABLE_ROWS + 1
 
     for r, record in enumerate(records, start=2):
         c = {key: f'{letter}{r}' for key, letter in LETTER.items()}
@@ -536,7 +556,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, COL['result'],
                 f'=IF({c["covering"]}="","",IF({c["covering"]}="Push","Push",IF({c["covering"]}={c["side"]},"Win","Loss")))')
         ws.cell(r, COL['hit_rate'],
-                f'=IF({dog}="","",LOOKUP({dog},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}))').number_format = '0%'
+                f'=IF({dog}="","",IFERROR(LOOKUP({dog},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}),""))').number_format = '0%'
         ws.cell(r, COL['notes'], record['notes'])
         ws.cell(r, COL['qb_flag'], record['qb_flag'])
         ws.cell(r, COL['correction'], record['correction']).number_format = '0.0'

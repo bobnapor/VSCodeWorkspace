@@ -21,6 +21,29 @@ SIGNAL_THRESHOLD = 0.5   # points of correction that flag an underdog on its own
 PICKS_PER_WEEK = 3       # the week's top underdogs by correction are always flagged (walk-forward: 57.6% over 21 seasons)
 
 
+HIT_RATE_BIN_STARTS = (-99.0, 0.0, 0.25, 0.5, 1.0)   # correction toward the underdog, in points; negative = toward the favorite
+
+
+def backtest_hit_rates(table, season):
+    """How often the correction's side covered, by size of the correction toward the underdog.
+
+    Walk-forward from 2006 through the games already played in `season` (each season predicted by a model fitted only
+    on earlier seasons, as in production).  Returns [(bin start, cover rate, games)], one row per bin of
+    HIT_RATE_BIN_STARTS, so the sheet's Backtest ATS Win % reflects every game played to date.
+    """
+    frame = lab.walk_forward(table, lab.ridge_margin(SIGNAL_FEATURES, alpha=SIGNAL_ALPHA, target='resid'), last_test=season)
+    frame = frame[frame['resid'] != 0]
+    pred = frame['pred'].to_numpy()
+    win = np.where(pred > 0, frame['resid'].to_numpy() > 0, frame['resid'].to_numpy() < 0)
+    toward_underdog = np.where((pred > 0) == (frame['spread_line'].to_numpy() < 0), np.abs(pred), -np.abs(pred))
+    rows = []
+    for i, start in enumerate(HIT_RATE_BIN_STARTS):
+        end = HIT_RATE_BIN_STARTS[i + 1] if i + 1 < len(HIT_RATE_BIN_STARTS) else np.inf
+        in_bin = (toward_underdog >= start) & (toward_underdog < end)
+        rows.append((start, float(win[in_bin].mean()) if in_bin.any() else None, int(in_bin.sum())))
+    return rows
+
+
 def weekly_picks(candidates, per_week=PICKS_PER_WEEK, threshold=SIGNAL_THRESHOLD):
     """Underdogs to bet this week: the `per_week` largest corrections toward the underdog, plus any at the threshold.
 

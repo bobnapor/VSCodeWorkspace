@@ -89,10 +89,14 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         final_rows.append({'week': label, 'year': season, 'home_team': home, 'away_team': away, 'projected': mean, 'actual': actual})
     logging.info("Projections complete!")
 
+    hit_rates = None
     # The underdog signal: the correction to the spread that the research found worth flagging
     try:
         import nfl_signal
         lab_table = lab.build_table(lab.ALL_PAIRS, refresh=True)
+        hit_rates = nfl_signal.backtest_hit_rates(lab_table, season)
+        logging.info("Backtest cover rate by correction toward the underdog (walk-forward, 2006 to date): "
+                     + ", ".join(f"{start:g}+: {rate:.1%} ({games})" for start, rate, games in hit_rates if rate is not None))
         corrections = nfl_signal.week_corrections(season, week, lab_table)
         for row in final_rows:
             row['correction'] = corrections.get((row['home_team'], row['away_team']))
@@ -138,7 +142,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
     try:
         output_path, rows_added, actuals_updated, spreads_filled = sheet.write_projections_spreadsheet(
             final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
-            qb_flag_fetcher=sheet.fetch_qb_injury_flags,
+            qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates,
         )
         logging.info(
             f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "
