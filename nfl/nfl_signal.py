@@ -18,7 +18,7 @@ from nfl_injury_features import TEAM_FULL_NAMES
 SIGNAL_ALPHA = 10000.0
 SIGNAL_FEATURES = lab.PBP_FEATURES + lab.BOX_FEATURES + lab.BASIC_CONTEXT
 SIGNAL_THRESHOLD = 0.5   # points of correction that flag an underdog on its own
-PICKS_PER_WEEK = 4       # the week's top underdogs by correction are always flagged (walk-forward: 56.3% over 21 seasons)
+PICKS_PER_WEEK = 3       # the week's top underdogs by correction are always flagged (walk-forward: 57.6% over 21 seasons)
 
 
 def weekly_picks(candidates, per_week=PICKS_PER_WEEK, threshold=SIGNAL_THRESHOLD):

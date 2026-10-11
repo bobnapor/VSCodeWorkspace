@@ -15,7 +15,7 @@ import requests
 # regular seasons, 3,132 games, pushes excluded). Each pair is (smallest edge in points, ATS win rate for edges
 # from there to the next row). Every band sits near 50%, and break-even at -110 is 52.4%, so these are hit
 # rates and not probabilities of covering.
-ATS_HIT_RATE_BY_EDGE = ((0, 0.51), (3, 0.53), (6, 0.49))
+ATS_HIT_RATE_BY_EDGE = ((-99, 0.51), (0, 0.53), (0.25, 0.53), (0.5, 0.58), (1, 0.58))
 HIT_RATE_HEADER = 'Backtest ATS Win % (at this edge)'
 OLD_COVER_PROBABILITY_HEADER = 'Cover Probability (Side to Cover)'
 
@@ -44,7 +44,7 @@ TABLE_COLUMNS = (18, 19)
 THRESHOLD_ROW = 7
 PICKS_ROW = 8
 DEFAULT_SIGNAL_THRESHOLD = 0.5
-DEFAULT_PICKS_PER_WEEK = 4
+DEFAULT_PICKS_PER_WEEK = 3
 SPREADSHEET_COLUMN_WIDTHS = {'R': 16.0, 'S': 18.0}
 OLD_TABLE_HEADER = 'Edge (pts) from'
 
@@ -158,7 +158,7 @@ def _write_hit_rate_table(ws):
     from openpyxl.styles import Alignment, Font
 
     edge_col, rate_col = TABLE_COLUMNS
-    for col, title in ((edge_col, 'Edge (pts) from'), (rate_col, 'Backtest ATS Win %')):
+    for col, title in ((edge_col, 'Underdog-side correction from'), (rate_col, 'Backtest ATS Win %')):
         cell = ws.cell(1, col, title)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
@@ -422,7 +422,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         records.append({
             'week': week_value(row['week']), 'year': int(row['year']),
             'home': row['home_team'], 'away': row['away_team'],
-            'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None,
+            'fair_line': row['fair_line'] if row.get('fair_line') is not None else fair_line_as_home(float(row['projected'])), 'spread': None,
             'actual': actuals.get(key), 'notes': None, 'qb_flag': None, 'correction': row.get('correction'),
         })
         added += 1
@@ -484,7 +484,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, 11, f'=IF(J{r}="","",IF(J{r}="Push","Push",IF(J{r}=H{r},"Win","Loss")))')
         last_table_row = len(ATS_HIT_RATE_BY_EDGE) + 1
         edge_letter, rate_letter = 'R', 'S'
-        ws.cell(r, 12, f'=IF(F{r}="","",LOOKUP(ABS(G{r}),${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}))').number_format = '0%'
+        ws.cell(r, 12, f'=IF(Q{r}="","",LOOKUP(Q{r},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}))').number_format = '0%'
         ws.cell(r, 13, record['notes'])
         ws.cell(r, QB_FLAG_COLUMN, record['qb_flag'])
         ws.cell(r, CORRECTION_COLUMN, record['correction']).number_format = '0.0'
