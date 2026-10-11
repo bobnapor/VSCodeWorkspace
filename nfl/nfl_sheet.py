@@ -31,7 +31,9 @@ LAYOUT = (
     ('pick', 'Pick'), ('teaser', 'Teaser Leg (6 pts)'), ('dog_correction', 'Correction Toward Underdog'), ('hit_rate', HIT_RATE_HEADER),
     ('fair_line', 'Fair Line (as Home)'), ('fair_vs_spread', 'Fair Line vs Spread'), ('side', 'Side to Cover'),
     ('actual', 'Actual Score Difference (as Home)'), ('covering', 'Covering Team'), ('result', 'Result'), ('teaser_result', 'Teaser Result'),
+    ('clv', 'Pick Line vs Close (pts)'),
     ('qb_flag', 'QB Injury Flag'), ('notes', 'Notes'), ('year', 'Year'), ('correction', 'Model Correction (as Home)'),
+    ('close', 'Closing Spread (as Home)'),
 )
 COL = {key: index for index, (key, _) in enumerate(LAYOUT, start=1)}
 LETTER = {key: chr(64 + index) for key, index in COL.items()}   # fewer than 26 columns, so A-Z is enough
@@ -58,6 +60,8 @@ SETTINGS = {
 SETTINGS_NOTE_ROW = 11
 TEASER_TABLE_ROW = 14
 TEASER_HEADERS = ('Teaser leg (weeks 5-16)', 'Win % since 1999', 'Win % since 2018')
+SEASON_TABLE_ROW = 19
+SEASON_HEADER = 'This season so far'
 MAX_QB_FLAG_WIDTH = 40
 MAX_NOTES_WIDTH = 30
 MIN_NOTES_WIDTH = 24
@@ -218,6 +222,26 @@ def _reset_sheet(ws, settings, hit_rate_table, teaser_table, through_season):
             ws.cell(r, games_col, recent_rate).number_format = '0.0%'
         ws.cell(TEASER_TABLE_ROW + len(teaser_table) + 1, edge_col,
                 'Teaser legs: published Wong rule, 6 points through 3 and 7. A 2-team teaser needs 72.4% per leg at -110, 73.9% at -120.')
+    # the season so far, from the sheet's own rows: the pick and teaser-leg records and how the picks' lines compared with the close
+    header(SEASON_TABLE_ROW, edge_col, SEASON_HEADER)
+    span = lambda key: f'${LETTER[key]}$2:${LETTER[key]}${FORMAT_LAST_ROW}'
+    pick_count = lambda outcome: f'COUNTIFS({span("pick")},"?*",{span("result")},"{outcome}")'
+    teaser_count = lambda outcome: f'COUNTIF({span("teaser_result")},"{outcome}")'
+    season_rows = (
+        ('Picks won-lost-push', f'={pick_count("Win")}&"-"&{pick_count("Loss")}&"-"&{pick_count("Push")}', None),
+        ('Pick win %', f'=IFERROR({pick_count("Win")}/({pick_count("Win")}+{pick_count("Loss")}),"")', '0.0%'),
+        ('Picks: average points better than the close', f'=IFERROR(AVERAGE({span("clv")}),"")', '+0.00;-0.00;0.00'),
+        ('Teaser legs won-lost', f'={teaser_count("Win")}&"-"&{teaser_count("Loss")}', None),
+        ('Teaser leg win %', f'=IFERROR({teaser_count("Win")}/({teaser_count("Win")}+{teaser_count("Loss")}),"")', '0.0%'),
+    )
+    for r, (label, formula, number_format) in enumerate(season_rows, start=SEASON_TABLE_ROW + 1):
+        ws.cell(r, edge_col, label).font = Font(bold=True)
+        cell = ws.cell(r, rate_col, formula)
+        cell.alignment = Alignment(horizontal='right')
+        if number_format:
+            cell.number_format = number_format
+    ws.cell(SEASON_TABLE_ROW + len(season_rows) + 1, edge_col,
+            'Points better than the close: how many more points your pick got than the closing line (positive = you beat the close).')
     _add_conditional_formatting(ws)
 
 
@@ -374,7 +398,7 @@ def _autosize_columns(ws, records):
     formula_samples = {
         'pick': ['x' * longest_nickname + ' +99.5'], 'teaser': ['x' * longest_nickname + ' +8.5'], 'dog_correction': ['-9.9'],
         'hit_rate': ['100%'], 'fair_vs_spread': ['-99.5'], 'side': ['x' * longest_nickname], 'covering': ['x' * longest_nickname],
-        'result': ['Push', 'Loss'], 'teaser_result': ['Loss'],
+        'result': ['Push', 'Loss'], 'teaser_result': ['Loss'], 'clv': ['+99.5'],
     }
     fair_line_like = ('fair_line', 'correction')
 
@@ -417,7 +441,7 @@ def _autosize_columns(ws, records):
 
 
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None,
-                                  hit_rate_table=None, teaser_table=None):
+                                  hit_rate_table=None, teaser_table=None, closing_lookup=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook acts as a running log for the season: each run adds its week's games in week order, so
@@ -430,6 +454,8 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     Network in production); a spread already in the sheet is never replaced, and notes are never touched.
     Games not yet played get a QB Injury Flag from `qb_flag_fetcher(year, week)` ({(home, away): text}),
     refreshed every run since injury reports change through the week; played games keep their last flag.
+    Played games get their closing spread (as home) from `closing_lookup` ({(week, year, home, away): spread}), so each
+    pick shows how many more points it got than the close.
     Layout: the columns you act on come first (week, teams, spread, the underdog pick), then the model's numbers,
     then the result, with the long QB flags and notes and the bookkeeping columns last. The sheet is read back by
     header text and laid out again every run, so an older layout migrates; columns that need manual entry are
@@ -471,6 +497,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     for row in rows:
         if played_actual(row['actual']) is not None:
             actuals[game_key(row['week'], row['year'], row['home_team'], row['away_team'])] = played_actual(row['actual'])
+    closes = {game_key(*key): spread for key, spread in (closing_lookup or {}).items() if spread is not None and not pd.isna(spread)}
 
     # Read the existing games so the sheet can be rewritten in week order
     records = []
@@ -487,7 +514,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'home': cell_value(r, 'home'), 'away': cell_value(r, 'away'),
             'fair_line': cell_value(r, 'fair_line'), 'spread': cell_value(r, 'spread'),
             'actual': cell_value(r, 'actual'), 'notes': cell_value(r, 'notes'),
-            'qb_flag': cell_value(r, 'qb_flag'), 'correction': cell_value(r, 'correction'),
+            'qb_flag': cell_value(r, 'qb_flag'), 'correction': cell_value(r, 'correction'), 'close': cell_value(r, 'close'),
         }
         key = game_key(record['week'], record['year'], record['home'], record['away'])
         existing_keys.add(key)
@@ -512,9 +539,15 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'week': week_value(row['week']), 'year': int(row['year']),
             'home': row['home_team'], 'away': row['away_team'],
             'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None,
-            'actual': actuals.get(key), 'notes': None, 'qb_flag': None, 'correction': row.get('correction'),
+            'actual': actuals.get(key), 'notes': None, 'qb_flag': None, 'correction': row.get('correction'), 'close': None,
         })
         added += 1
+
+    # Closing spreads for games that have been played (kept once filled)
+    for record in records:
+        key = game_key(record['week'], record['year'], record['home'], record['away'])
+        if key in closes:
+            record['close'] = float(closes[key])
 
     # Quarterback injury flags for games not yet played; reports change through the week so these refresh every run
     if qb_flag_fetcher:
@@ -574,7 +607,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     from openpyxl.styles import Alignment
 
-    centered = ('week', 'year', 'spread', 'dog_correction', 'hit_rate', 'fair_line', 'fair_vs_spread', 'actual', 'result',
+    centered = ('week', 'year', 'spread', 'dog_correction', 'hit_rate', 'fair_line', 'fair_vs_spread', 'actual', 'result', 'clv', 'close',
                 'teaser_result', 'correction')
     wrapped = ('qb_flag', 'notes')
     edge_letter, rate_letter = TABLE_LETTERS[0], TABLE_LETTERS[1]
@@ -608,6 +641,11 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, COL['notes'], record['notes'])
         ws.cell(r, COL['qb_flag'], record['qb_flag'])
         ws.cell(r, COL['correction'], record['correction']).number_format = '0.0'
+        # the closing spread, and how many more points the pick (the underdog) got than the close: positive = beat the close
+        ws.cell(r, COL['close'], record.get('close'))
+        ws.cell(r, COL['clv'],
+                f'=IF(OR({c["pick"]}="",{c["close"]}="",{spread}=""),"",IF({spread}>0,{spread}-{c["close"]},{c["close"]}-{spread}))'
+                ).number_format = '+0.0;-0.0;0.0'
         # the correction measured toward the underdog (positive = the model likes the underdog more than the spread does)
         ws.cell(r, COL['dog_correction'],
                 f'=IF(OR({spread}="",{c["correction"]}="",{spread}=0),"",ROUND(IF({spread}>0,{c["correction"]},-{c["correction"]}),3))').number_format = '0.0'

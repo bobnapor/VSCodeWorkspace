@@ -156,10 +156,16 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         (week_label(g.game_type, g.week), season, TEAM_FULL_NAMES.get(g.home_team, g.home_team), TEAM_FULL_NAMES.get(g.away_team, g.away_team)): int(g.result)
         for g in played.itertuples()
     }
+    # nflverse's spread_line is positive when the home team is favored; the sheet's spread is negative then
+    closing_lookup = {
+        (week_label(g.game_type, g.week), season, TEAM_FULL_NAMES.get(g.home_team, g.home_team), TEAM_FULL_NAMES.get(g.away_team, g.away_team)): -float(g.spread_line)
+        for g in played.itertuples() if not np.isnan(g.spread_line)
+    }
     try:
         output_path, rows_added, actuals_updated, spreads_filled = sheet.write_projections_spreadsheet(
             final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
             qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates, teaser_table=teaser_rates,
+            closing_lookup=closing_lookup,
         )
         logging.info(
             f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "

@@ -40,6 +40,7 @@ BREAK_EVEN = 0.5238
 WEEKS = (5, 16)
 BACKWARD_TRAIN = (2006, 2019)
 BACKWARD_TEST = range(1999, 2006)
+FROZEN_THRESHOLD = 0.25   # the key-number rule as it stood when it was frozen (production has since moved on)
 
 
 def add_qb_change(table):
@@ -86,7 +87,7 @@ def summary(label, g, seasons):
 
 
 def rule_frozen(f):
-    return f[f['key'] & (f['toward_dog'] > 0) & (f['toward_dog'] >= nfl_signal.SIGNAL_THRESHOLD)]
+    return f[f['key'] & (f['toward_dog'] > 0) & (f['toward_dog'] >= FROZEN_THRESHOLD)]
 
 
 def top_n(f, n):
