@@ -86,6 +86,61 @@ def _season_path(season):
     return os.path.join(CACHE_DIR, f'pbp_team_{season}.csv')
 
 
+SCORING_COLUMNS = ['game_id', 'season', 'week', 'home_team', 'away_team', 'posteam', 'defteam', 'td_team', 'touchdown',
+                   'field_goal_result', 'extra_point_result', 'two_point_conv_result', 'two_point_attempt', 'safety', 'play_deleted']
+
+
+def aggregate_scoring(pbp):
+    """Scoring events per team per game: touchdowns, field goals, extra points, two-point conversions, safeties.
+
+    6*td + xp + 2*two_pt + 3*fg + 2*safety rebuilds the final score exactly in about 99.6% of team-games
+    (the rest are defensive two-point returns).
+    """
+    pbp = pbp[pbp['play_deleted'].fillna(0) == 0]
+    rows = []
+    for game_id, g in pbp.groupby('game_id'):
+        for team in (g['home_team'].iloc[0], g['away_team'].iloc[0]):
+            rows.append({
+                'game_id': game_id, 'team': team, 'season': g['season'].iloc[0], 'week': g['week'].iloc[0],
+                'td': int(((g['touchdown'] == 1) & (g['td_team'] == team)).sum()),
+                'fg': int(((g['field_goal_result'] == 'made') & (g['posteam'] == team)).sum()),
+                'fg_att': int((g['field_goal_result'].notna() & (g['posteam'] == team)).sum()),
+                'xp': int(((g['extra_point_result'] == 'good') & (g['posteam'] == team)).sum()),
+                'xp_att': int((g['extra_point_result'].notna() & (g['posteam'] == team)).sum()),
+                'two_pt': int(((g['two_point_conv_result'] == 'success') & (g['posteam'] == team)).sum()),
+                'two_pt_att': int((g['two_point_conv_result'].notna() & (g['posteam'] == team)).sum()),
+                'safeties': int(((g['safety'] == 1) & (g['defteam'] == team)).sum()),
+            })
+    return pd.DataFrame(rows)
+
+
+def build_scoring_season(season, refresh=False):
+    path = os.path.join(CACHE_DIR, f'pbp_scoring_{season}.csv')
+    if os.path.exists(path) and not refresh:
+        return pd.read_csv(path)
+    raw = os.path.join(CACHE_DIR, f'_pbp_{season}.csv.gz')
+    response = requests.get(PBP_URL.format(year=season), timeout=300)
+    response.raise_for_status()
+    with open(raw, 'wb') as f:
+        f.write(response.content)
+    present = pd.read_csv(raw, nrows=1).columns
+    pbp = pd.read_csv(raw, usecols=[c for c in SCORING_COLUMNS if c in present], low_memory=False)
+    result = aggregate_scoring(pbp)
+    result.to_csv(path, index=False)
+    os.remove(raw)
+    return result
+
+
+def load_scoring_events(first_season=1999, last_season=2026, refresh_latest=False):
+    frames = []
+    for season in range(first_season, last_season + 1):
+        try:
+            frames.append(build_scoring_season(season, refresh=refresh_latest and season == last_season))
+        except requests.RequestException:
+            continue
+    return pd.concat(frames, ignore_index=True)
+
+
 def build_season(season, refresh=False):
     path = _season_path(season)
     if os.path.exists(path) and not refresh:

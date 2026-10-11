@@ -43,9 +43,12 @@ python nfl_prod_projections.py
 
 `nfl_research_injuries.py` layers pre-game injury features from `nfl_injury_features.py` (quarterback status from the official reports, quarterback quality, and counts of players Out or Doubtful by position group) onto that test and looks directly at games where a starting quarterback is out.
 
+`nfl_sim.py` is a Monte Carlo game simulator: each team gets a number of scoring drives, touchdowns and field goals are drawn from binomials with era-based extra-point and two-point rates, and expected points are centered on the closing line plus the signal's correction. Simulated margins are reweighted so the key numbers (3, 7, ties, pushes) match the last 12 seasons of real results. `nfl_research_sim.py` uses it to test selecting bets by simulated expected value (it did not beat the simple correction-size rule), moneyline bets (no edge), Kelly staking, and a season-level bootstrap, Bayesian posterior and bankroll simulation of the signal's uncertainty (true win rate roughly 52-55%, so losing seasons are common). The simulator is research-only and does not feed the spreadsheet.
+
 ```
 cd nfl
 python nfl_research_signal.py
+python nfl_research_sim.py
 python nfl_research_model.py
 python nfl_research_ats.py
 python nfl_research_injuries.py
