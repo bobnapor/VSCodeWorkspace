@@ -141,10 +141,19 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             teaser_rates = nfl_signal.teaser_leg_rates(lab_table)
             logging.info("Wong teaser legs, weeks 5-16: " + "; ".join(
                 f"{label}: {rate:.1%} of {n} since 1999, {recent:.1%} of {m} since 2018" for label, rate, n, recent, m in teaser_rates))
-        with run.step(5, "Finding this week's picks and teaser legs (model corrections and DraftKings spreads)"):
+        with run.step(5, "Finding this week's picks and teaser legs (model corrections, reasons and DraftKings spreads)"):
             corrections = nfl_signal.week_corrections(season, week, lab_table)
+            try:
+                import nfl_reasons
+                reasons = nfl_reasons.season_reasons(lab_table, season, range(1, week + 1))
+            except Exception as e:
+                logging.warning(f"Could not build the reasons for the model's leans (the picks are unaffected): {e}")
+                reasons = {}
             for row in final_rows:
                 row['correction'] = corrections.get((row['home_team'], row['away_team']))
+                found = reasons.get((week, row['home_team'], row['away_team']))
+                if found:
+                    row['reason'] = found[1]
             spreads = sheet.fetch_draftkings_spreads(season, week)
             in_pick_weeks = nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]
             logging.info(f"\n=== PICKS: every underdog the correction favors, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]} "
@@ -162,6 +171,9 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             for key in picks:
                 team, points, toward_dog = details[key]
                 logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts toward the underdog")
+                found = reasons.get((week, key[0], key[1]))
+                if found:
+                    logging.info("    Why: " + found[1].replace('\n', '\n         '))
             if not in_pick_weeks:
                 logging.info(f"No picks: week {week} is outside weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}")
             logging.info(f"{len(picks)} picks this week. The sheet's fair line is the spread plus the correction; "
@@ -177,12 +189,14 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                                  f"({row['away_team']} at {row['home_team']}, spread {abs(line):g})")
                     legs += 1
             logging.info(f"{legs} teaser legs this week")
-        # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections filled in
-        with run.step(6, f"Filling in model corrections for weeks 1-{week - 1}"):
+        # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections and reasons filled in
+        with run.step(6, f"Filling in model corrections and reasons for weeks 1-{week - 1}"):
             for earlier in range(1, week):
                 for (home, away), correction in nfl_signal.week_corrections(season, earlier, lab_table).items():
+                    found = reasons.get((earlier, home, away))
                     final_rows.append({'week': str(earlier), 'year': season, 'home_team': home, 'away_team': away,
-                                       'projected': 0.0, 'actual': None, 'correction': correction, 'backfill': True})
+                                       'projected': 0.0, 'actual': None, 'correction': correction, 'backfill': True,
+                                       'reason': found[1] if found else None})
     except Exception as e:
         logging.warning(f"Could not compute the underdog signal: {e}")
 
@@ -209,7 +223,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             output_path, rows_added, actuals_updated, spreads_filled = sheet.write_projections_spreadsheet(
                 final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
                 qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates, teaser_table=teaser_rates,
-                closing_lookup=closing_lookup,
+                closing_lookup=closing_lookup, current_week=final_rows[0]['week'],
             )
             logging.info(
                 f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "

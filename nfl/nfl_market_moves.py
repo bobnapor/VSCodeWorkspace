@@ -35,7 +35,8 @@ def _fetch(season, week):
 
 def _book_line(game, book):
     spread = game.get('markets', {}).get(str(book), {}).get('event', {}).get('spread', [])
-    home = next((o for o in spread if o.get('side') == 'home'), None)
+    # a game under way also carries live in-game lines; the pre-game line it keeps is the closing line
+    home = next((o for o in spread if o.get('side') == 'home' and not o.get('is_live')), None)
     return home
 
 
