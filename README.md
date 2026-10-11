@@ -4,7 +4,7 @@ Personal Python projects, one folder per area. Scripts import their siblings by 
 
 | Folder | Contents |
 |---|---|
-| [nfl/](nfl/) | NFL point-spread projections. `nfl_prod_projections.py` makes the weekly projections and `nfl_prod_backtest.py` backtests it; `nfl_model.py` is the model and `nfl_sheet.py` the spreadsheet. The `nflpicks*` scripts are older versions kept for reference. |
+| [nfl/](nfl/) | NFL point-spread picks. **See [nfl/README.md](nfl/README.md) for the full current state, evidence and handoff notes.** `nfl_prod_projections.py` runs the weekly projections and picks; `nfl_model.py` and `nfl_signal.py` are the models and `nfl_sheet.py` the spreadsheet. The `nflpicks*` scripts are older (broken) versions kept for reference. |
 | [mlb/](mlb/) | MLB picks, backtest and lines UI. |
 | [nba/](nba/) | NBA picks. |
 | [college/](college/) | College football and basketball picks. |
