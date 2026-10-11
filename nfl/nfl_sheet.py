@@ -16,17 +16,21 @@ import requests
 # the underdog) is computed each run by nfl_signal.backtest_hit_rates and written to the sheet; nothing is typed in.
 HIT_RATE_HEADER = 'Backtest ATS Win % (at this edge)'
 HIT_RATE_TABLE_ROWS = 5   # rows 2-6, just above the settings
-# Spreads that sit exactly on a key number; the pick rule only looks at underdogs on these (see nfl_signal.py)
+# Spreads that sit exactly on a key number (used by the research scripts; the pick rule no longer depends on them)
 KEY_LINES = (3.0, 6.0, 7.0, 10.0, 14.0)
+# Wong teaser legs (see nfl_signal.py): underdogs of +1.5/+2.5 and favorites of -7.5/-8.5, teased 6 points
+TEASER_DOG_LINES = (1.5, 2.5)
+TEASER_FAV_LINES = (7.5, 8.5)
+TEASER_POINTS = 6
 
-# Column order: what you act on first (week, teams, spread, the pick), then the model's numbers, then the result,
-# with the long text (QB flags, notes) and the bookkeeping columns last so the sheet fits on one screen.
+# Column order: what you act on first (week, teams, spread, the pick and teaser leg), then the model's numbers, then the
+# results, with the long text (QB flags, notes) and the bookkeeping columns last so the sheet fits on one screen.
 # The sheet is laid out again from these every run and read back by header text, so older layouts migrate.
 LAYOUT = (
     ('week', 'Week'), ('home', 'Home Team'), ('away', 'Away Team'), ('spread', 'Spread (as Home)'),
-    ('pick', 'Pick'), ('dog_correction', 'Correction Toward Underdog'), ('hit_rate', HIT_RATE_HEADER),
+    ('pick', 'Pick'), ('teaser', 'Teaser Leg (6 pts)'), ('dog_correction', 'Correction Toward Underdog'), ('hit_rate', HIT_RATE_HEADER),
     ('fair_line', 'Fair Line (as Home)'), ('fair_vs_spread', 'Fair Line vs Spread'), ('side', 'Side to Cover'),
-    ('actual', 'Actual Score Difference (as Home)'), ('covering', 'Covering Team'), ('result', 'Result'),
+    ('actual', 'Actual Score Difference (as Home)'), ('covering', 'Covering Team'), ('result', 'Result'), ('teaser_result', 'Teaser Result'),
     ('qb_flag', 'QB Injury Flag'), ('notes', 'Notes'), ('year', 'Year'), ('correction', 'Model Correction (as Home)'),
 )
 COL = {key: index for index, (key, _) in enumerate(LAYOUT, start=1)}
@@ -39,19 +43,21 @@ REQUIRED_FIELDS = ('week', 'year', 'home', 'away', 'fair_line', 'spread', 'actua
 # Columns filled in by hand
 MANUAL_INPUT_FIELDS = ('spread', 'actual', 'notes')
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
-# Settings and the hit-rate lookup table sit one column to the right of the data: correction from, then the cover rate
-# and games on key-number lines, then the same for other lines
-TABLE_COLUMNS = tuple(LAST_SHEET_COLUMN + offset for offset in range(2, 7))
+# Settings and the lookup tables sit one column to the right of the data
+TABLE_COLUMNS = tuple(LAST_SHEET_COLUMN + offset for offset in range(2, 5))
 TABLE_LETTERS = tuple(chr(64 + c) for c in TABLE_COLUMNS)
 TABLE_EDGE_HEADER = 'Correction toward underdog from'
-TABLE_HEADERS = (TABLE_EDGE_HEADER, 'Key-line ATS Win %', 'Key-line games', 'Other-line ATS Win %', 'Other-line games')
-# Editable settings under the hit-rate table: key -> (label, default, row)
+TABLE_HEADERS = (TABLE_EDGE_HEADER, 'Backtest ATS Win %', 'Games')
+# Editable settings under the hit-rate table: key -> (label, default, row).  The minimum correction has a new label so a
+# sheet still holding the old key-number rule's 0.25 starts from the new default.
 SETTINGS = {
-    'threshold': ('Minimum correction (pts)', 0.25, 7),
+    'threshold': ('Minimum correction toward underdog (pts)', 0.0, 7),
     'first_week': ('First pick week', 5, 8),
     'last_week': ('Last pick week', 16, 9),
 }
 SETTINGS_NOTE_ROW = 11
+TEASER_TABLE_ROW = 14
+TEASER_HEADERS = ('Teaser leg (weeks 5-16)', 'Win % since 1999', 'Win % since 2018')
 MAX_QB_FLAG_WIDTH = 40
 MAX_NOTES_WIDTH = 30
 MIN_NOTES_WIDTH = 24
@@ -111,48 +117,59 @@ RESULT_FORMAT_RULES = (
     ('Loss', 'FFC7CE'),  # light red
 )
 SIGNAL_FILL_COLOR = 'BDD7EE'   # light blue
+TEASER_FILL_COLOR = 'FCE4D6'   # light orange
 FORMAT_LAST_ROW = 1000          # formatting and the weekly ranking cover rows well past the current data
 
 
 def _add_conditional_formatting(ws):
-    """Green/red on Covering Team and Result for a win/loss, and light blue on a flagged underdog."""
+    """Green/red on Covering Team, Result and Teaser Result for a win/loss; light blue on a pick, light orange on a teaser leg."""
     from openpyxl.formatting.rule import FormulaRule
     from openpyxl.styles import PatternFill
 
+    def fill(color):
+        return PatternFill(start_color=color, end_color=color, fill_type='solid')
+
     result_range = f"{LETTER['covering']}2:{LETTER['result']}{FORMAT_LAST_ROW}"
+    teaser_result = LETTER['teaser_result']
     for result, color in RESULT_FORMAT_RULES:
-        ws.conditional_formatting.add(
-            result_range,
-            FormulaRule(formula=[f'${LETTER["result"]}2="{result}"'], fill=PatternFill(start_color=color, end_color=color, fill_type='solid')),
-        )
-    pick = LETTER['pick']
-    ws.conditional_formatting.add(
-        f'{pick}2:{pick}{FORMAT_LAST_ROW}',
-        FormulaRule(formula=[f'LEN(${pick}2)>0'], fill=PatternFill(start_color=SIGNAL_FILL_COLOR, end_color=SIGNAL_FILL_COLOR, fill_type='solid')),
-    )
+        ws.conditional_formatting.add(result_range, FormulaRule(formula=[f'${LETTER["result"]}2="{result}"'], fill=fill(color)))
+        ws.conditional_formatting.add(f'{teaser_result}2:{teaser_result}{FORMAT_LAST_ROW}',
+                                      FormulaRule(formula=[f'${teaser_result}2="{result}"'], fill=fill(color)))
+    for key, color in (('pick', SIGNAL_FILL_COLOR), ('teaser', TEASER_FILL_COLOR)):
+        letter = LETTER[key]
+        ws.conditional_formatting.add(f'{letter}2:{letter}{FORMAT_LAST_ROW}', FormulaRule(formula=[f'LEN(${letter}2)>0'], fill=fill(color)))
 
 
 def _hit_rate_table_from(ws):
-    """The cover-rate table the sheet already holds, for runs that can't recompute it.
+    """The cover-rate table the sheet already holds, [(correction from, rate, games)], for runs that can't recompute it.
 
-    Rows are (correction from, key-line rate, key-line games, other-line rate, other-line games).  Only tables with all
-    five columns are taken, which leaves out the older layouts.
+    Only a table with the current three headers is taken, which leaves out the older layouts.
     """
     for row in ws.iter_rows(min_row=1, max_row=1, max_col=40):
         for cell in row:
-            if cell.value == TABLE_EDGE_HEADER and ws.cell(1, cell.column + 4).value == TABLE_HEADERS[4]:
-                rows = [tuple(ws.cell(r, cell.column + i).value for i in range(5)) for r in range(2, 2 + HIT_RATE_TABLE_ROWS)]
-                return [r for r in rows if isinstance(r[0], (int, float))]
+            if cell.value == TABLE_EDGE_HEADER and ws.cell(1, cell.column + 2).value == TABLE_HEADERS[2]:
+                rows = [tuple(ws.cell(r, cell.column + i).value for i in range(3)) for r in range(2, 2 + HIT_RATE_TABLE_ROWS)]
+                return [r for r in rows if all(isinstance(v, (int, float)) for v in r)]
     return []
 
 
-def _reset_sheet(ws, settings, hit_rate_table, through_season):
-    """Clear the sheet and lay out the header, settings table, formatting and panes from scratch.
+def _teaser_table_from(ws):
+    """The teaser-leg table the sheet already holds, [(label, rate since 1999, rate since 2018)]."""
+    for row in ws.iter_rows(min_row=1, max_row=40, max_col=40):
+        for cell in row:
+            if cell.value == TEASER_HEADERS[0]:
+                rows = [tuple(ws.cell(r, cell.column + i).value for i in range(3)) for r in (cell.row + 1, cell.row + 2)]
+                return [r for r in rows if isinstance(r[1], (int, float))]
+    return []
+
+
+def _reset_sheet(ws, settings, hit_rate_table, teaser_table, through_season):
+    """Clear the sheet and lay out the header, settings and tables, formatting and panes from scratch.
 
     Rewriting it every run is what lets an older layout turn into the current one: the games were already read
     back by header text, and the formulas are written again for wherever the columns now are.
-    `hit_rate_table` is [(correction from, key-line rate, key-line games, other-line rate, other-line games)] for the
-    Backtest ATS Win % column.
+    `hit_rate_table` is [(correction from, rate, games)] for the Backtest ATS Win % column and `teaser_table`
+    [(label, rate since 1999, rate since 2018)] for the teaser legs.
     """
     from openpyxl.formatting.formatting import ConditionalFormattingList
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -163,36 +180,44 @@ def _reset_sheet(ws, settings, hit_rate_table, through_season):
     ws.row_dimensions.clear()
     ws.freeze_panes = 'A2'
 
-    manual_fill = PatternFill(fill_type='solid', start_color=MANUAL_INPUT_FILL_COLOR, end_color=MANUAL_INPUT_FILL_COLOR)
-    for col, (key, header) in enumerate(LAYOUT, start=1):
-        cell = ws.cell(1, col, header)
+    def header(row, col, title):
+        cell = ws.cell(row, col, title)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.border = Border(bottom=Side(style='medium'))
+        return cell
+
+    manual_fill = PatternFill(fill_type='solid', start_color=MANUAL_INPUT_FILL_COLOR, end_color=MANUAL_INPUT_FILL_COLOR)
+    for col, (key, title) in enumerate(LAYOUT, start=1):
+        cell = header(1, col, title)
         if key in MANUAL_INPUT_FIELDS:
             cell.fill = manual_fill
 
-    edge_col, key_rate_col = TABLE_COLUMNS[0], TABLE_COLUMNS[1]
+    edge_col, rate_col, games_col = TABLE_COLUMNS
     for col, title in zip(TABLE_COLUMNS, TABLE_HEADERS):
-        cell = ws.cell(1, col, title)
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        cell.border = Border(bottom=Side(style='medium'))
-    for r, row in enumerate(hit_rate_table[:HIT_RATE_TABLE_ROWS], start=2):
-        for col, value in zip(TABLE_COLUMNS, row):
-            cell = ws.cell(r, col, value)
-            if col in (TABLE_COLUMNS[1], TABLE_COLUMNS[3]):
-                cell.number_format = '0.0%'
-    # editable settings: the correction toward the underdog a game needs, and the weeks picks are made in
+        header(1, col, title)
+    for r, (edge, rate, games) in enumerate(hit_rate_table[:HIT_RATE_TABLE_ROWS], start=2):
+        ws.cell(r, edge_col, edge)
+        ws.cell(r, rate_col, rate).number_format = '0.0%'
+        ws.cell(r, games_col, games)
+    # editable settings: the correction toward the underdog a pick needs, and the weeks picks are made in
     for key, (label, _default, row) in SETTINGS.items():
         ws.cell(row, edge_col, label).font = Font(bold=True)
-        ws.cell(row, key_rate_col, settings[key])
+        ws.cell(row, rate_col, settings[key])
+    first, last = settings['first_week'], settings['last_week']
     if hit_rate_table:
-        first, last = settings['first_week'], settings['last_week']
-        ws.cell(SETTINGS_NOTE_ROW, edge_col, f'Table: walk-forward backtest, 2006-{through_season} regular seasons, weeks {first}-{last}, '
-                                              f'recomputed every run. Break-even at -110 is 52.4%.').alignment = Alignment(wrap_text=False)
-        ws.cell(SETTINGS_NOTE_ROW + 1, edge_col, f'Key lines are spreads of {", ".join(f"{k:g}" for k in KEY_LINES)}. '
-                                                  f'A game is picked when its line is a key line and the correction reaches the minimum.')
+        ws.cell(SETTINGS_NOTE_ROW, edge_col, f'Table: every game 1999-{through_season}, weeks {first}-{last}, each scored by a model that never saw it; '
+                                              f'recomputed every run. Break-even at -110 is 52.4%. -99 means the correction favors the favorite.')
+        ws.cell(SETTINGS_NOTE_ROW + 1, edge_col, 'Pick = the underdog when the correction favors it by more than the minimum.')
+    if teaser_table:
+        for col, title in zip(TABLE_COLUMNS, TEASER_HEADERS):
+            header(TEASER_TABLE_ROW, col, title)
+        for r, (label, all_rate, recent_rate) in enumerate(teaser_table, start=TEASER_TABLE_ROW + 1):
+            ws.cell(r, edge_col, label)
+            ws.cell(r, rate_col, all_rate).number_format = '0.0%'
+            ws.cell(r, games_col, recent_rate).number_format = '0.0%'
+        ws.cell(TEASER_TABLE_ROW + len(teaser_table) + 1, edge_col,
+                'Teaser legs: published Wong rule, 6 points through 3 and 7. A 2-team teaser needs 72.4% per leg at -110, 73.9% at -120.')
     _add_conditional_formatting(ws)
 
 
@@ -347,8 +372,9 @@ def _autosize_columns(ws, records):
     nicknames = [name.split()[-1] for record in records for name in (record['home'], record['away'])]
     longest_nickname = max((len(name) for name in nicknames), default=8)
     formula_samples = {
-        'pick': ['x' * longest_nickname + ' +99.5'], 'dog_correction': ['-9.9'], 'hit_rate': ['100%'],
-        'fair_vs_spread': ['-99.5'], 'side': ['x' * longest_nickname], 'covering': ['x' * longest_nickname], 'result': ['Push', 'Loss'],
+        'pick': ['x' * longest_nickname + ' +99.5'], 'teaser': ['x' * longest_nickname + ' +8.5'], 'dog_correction': ['-9.9'],
+        'hit_rate': ['100%'], 'fair_vs_spread': ['-99.5'], 'side': ['x' * longest_nickname], 'covering': ['x' * longest_nickname],
+        'result': ['Push', 'Loss'], 'teaser_result': ['Loss'],
     }
     fair_line_like = ('fair_line', 'correction')
 
@@ -374,7 +400,7 @@ def _autosize_columns(ws, records):
             width = max(min(width, MAX_NOTES_WIDTH), MIN_NOTES_WIDTH)
         widths[key] = width
         ws.column_dimensions[get_column_letter(col)].width = width
-    for col, width in zip(TABLE_COLUMNS, (24.0, 12.0, 11.0, 12.0, 11.0)):
+    for col, width in zip(TABLE_COLUMNS, (32.0, 14.0, 14.0)):
         ws.column_dimensions[get_column_letter(col)].width = width
 
     # Header row tall enough for the longest wrapped header; data rows tall enough for wrapped flags and notes
@@ -391,7 +417,7 @@ def _autosize_columns(ws, records):
 
 
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None,
-                                  hit_rate_table=None):
+                                  hit_rate_table=None, teaser_table=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook acts as a running log for the season: each run adds its week's games in week order, so
@@ -426,6 +452,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     fields = _field_columns(ws)
     # a table that couldn't be recomputed this run keeps what the sheet already holds
     hit_rate_table = [r for r in (hit_rate_table or []) if r[1] is not None] or _hit_rate_table_from(ws)
+    teaser_table = [(label, all_rate, recent) for label, all_rate, _n, recent, _m in (teaser_table or [])] or _teaser_table_from(ws)
 
     def week_value(week):
         return int(week) if str(week).isdigit() else week
@@ -543,21 +570,22 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     # within a week keep the order they were first written in
     records.sort(key=season_order)
 
-    _reset_sheet(ws, settings, hit_rate_table, int(year))
+    _reset_sheet(ws, settings, hit_rate_table, teaser_table, int(year))
 
     from openpyxl.styles import Alignment
 
-    centered = ('week', 'year', 'spread', 'dog_correction', 'hit_rate', 'fair_line', 'fair_vs_spread', 'actual', 'result', 'correction')
+    centered = ('week', 'year', 'spread', 'dog_correction', 'hit_rate', 'fair_line', 'fair_vs_spread', 'actual', 'result',
+                'teaser_result', 'correction')
     wrapped = ('qb_flag', 'notes')
-    edge_letter, key_rate_letter, other_rate_letter = TABLE_LETTERS[0], TABLE_LETTERS[1], TABLE_LETTERS[3]
+    edge_letter, rate_letter = TABLE_LETTERS[0], TABLE_LETTERS[1]
     last_table_row = HIT_RATE_TABLE_ROWS + 1
-    setting = {key: f'${TABLE_LETTERS[1]}${row}' for key, (_label, _default, row) in SETTINGS.items()}
+    setting = {key: f'${rate_letter}${row}' for key, (_label, _default, row) in SETTINGS.items()}
 
     for r, record in enumerate(records, start=2):
         c = {key: f'{letter}{r}' for key, letter in LETTER.items()}
         home_name, away_name = _nickname(c['home']), _nickname(c['away'])
         spread, actual, dog = c['spread'], c['actual'], c['dog_correction']
-        on_key_line = 'OR(' + ','.join(f'ABS({spread})={k:g}' for k in KEY_LINES) + ')'
+        in_pick_weeks = f'AND(ISNUMBER({c["week"]}),{c["week"]}>={setting["first_week"]},{c["week"]}<={setting["last_week"]})'
 
         ws.cell(r, COL['week'], record['week'])
         ws.cell(r, COL['year'], record['year'])
@@ -573,22 +601,33 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 f'=IF(OR({spread}="",{actual}=""),"",IF({actual}+{spread}=0,"Push",IF(({actual}+{spread})>0,{home_name},{away_name})))')
         ws.cell(r, COL['result'],
                 f'=IF({c["covering"]}="","",IF({c["covering"]}="Push","Push",IF({c["covering"]}={c["side"]},"Win","Loss")))')
-        # how often the model's side covered historically at this size of correction, on key-number lines or on others
-        lookup = lambda rate_letter: f'LOOKUP({dog},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row})'
+        # how often the model's side covered historically at this size of correction toward the underdog
         ws.cell(r, COL['hit_rate'],
-                f'=IF({dog}="","",IFERROR(IF({on_key_line},{lookup(key_rate_letter)},{lookup(other_rate_letter)}),""))').number_format = '0%'
+                f'=IF({dog}="","",IFERROR(LOOKUP({dog},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}),""))'
+                ).number_format = '0%'
         ws.cell(r, COL['notes'], record['notes'])
         ws.cell(r, COL['qb_flag'], record['qb_flag'])
         ws.cell(r, COL['correction'], record['correction']).number_format = '0.0'
         # the correction measured toward the underdog (positive = the model likes the underdog more than the spread does)
         ws.cell(r, COL['dog_correction'],
                 f'=IF(OR({spread}="",{c["correction"]}="",{spread}=0),"",ROUND(IF({spread}>0,{c["correction"]},-{c["correction"]}),3))').number_format = '0.0'
-        # the pick: in the pick weeks, the underdog's line is a key number, and the correction toward the underdog
-        # is positive and at least the minimum; shown with the underdog's spread
+        # the pick: in the pick weeks, the underdog whenever the correction favors it by more than the minimum
         underdog = f'IF({spread}>0,{home_name}&" +"&ABS({spread}),{away_name}&" +"&ABS({spread}))'
-        in_pick_weeks = f'AND(ISNUMBER({c["week"]}),{c["week"]}>={setting["first_week"]},{c["week"]}<={setting["last_week"]})'
         ws.cell(r, COL['pick'],
-                f'=IF({dog}="","",IF(AND({in_pick_weeks},{on_key_line},{dog}>0,{dog}>={setting["threshold"]}),{underdog},""))')
+                f'=IF({dog}="","",IF(AND({in_pick_weeks},{dog}>0,{dog}>={setting["threshold"]}),{underdog},""))')
+        # the Wong teaser leg: an underdog of +1.5/+2.5 teased up 6, or a favorite of -7.5/-8.5 teased down 6
+        dog_leg = 'OR(' + ','.join(f'ABS({spread})={v:g}' for v in TEASER_DOG_LINES) + ')'
+        fav_leg = 'OR(' + ','.join(f'ABS({spread})={v:g}' for v in TEASER_FAV_LINES) + ')'
+        dog_name = f'IF({spread}>0,{home_name},{away_name})'
+        fav_name = f'IF({spread}>0,{away_name},{home_name})'
+        ws.cell(r, COL['teaser'],
+                f'=IF(OR({spread}="",NOT({in_pick_weeks})),"",IF({dog_leg},{dog_name}&" +"&(ABS({spread})+{TEASER_POINTS}),'
+                f'IF({fav_leg},{fav_name}&" -"&(ABS({spread})-{TEASER_POINTS}),"")))')
+        # the teased side wins when its margin plus its spread plus 6 is positive (teased lines are half points: no pushes)
+        home_teased = f'OR(AND({dog_leg},{spread}>0),AND({fav_leg},{spread}<0))'
+        ws.cell(r, COL['teaser_result'],
+                f'=IF(OR({c["teaser"]}="",{actual}=""),"",IF({home_teased},IF({actual}+{spread}+{TEASER_POINTS}>0,"Win","Loss"),'
+                f'IF({actual}+{spread}<{TEASER_POINTS},"Win","Loss")))')
         for key in MANUAL_INPUT_FIELDS:
             ws.cell(r, COL[key]).fill = manual_fill
 

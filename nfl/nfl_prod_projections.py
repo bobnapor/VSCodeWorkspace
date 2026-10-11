@@ -89,20 +89,25 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         final_rows.append({'week': label, 'year': season, 'home_team': home, 'away_team': away, 'projected': mean, 'actual': actual})
     logging.info("Projections complete!")
 
-    hit_rates = None
-    # The underdog signal: the correction to the spread that the research found worth flagging
+    hit_rates, teaser_rates = None, None
+    # The underdog signal and the two pick rules (straight underdog picks and Wong teaser legs); see nfl_signal.py
     try:
         import nfl_signal
         lab_table = lab.build_table(lab.ALL_PAIRS, refresh=True)
         hit_rates = nfl_signal.backtest_hit_rates(lab_table, season)
-        logging.info("Backtest cover rate by correction toward the underdog, weeks 5-16, 2006 to date (key lines | other lines): "
-                     + ", ".join(f"{start:g}+: {kr:.1%} ({kg}) | {orr:.1%} ({og})" for start, kr, kg, orr, og in hit_rates if kr is not None and orr is not None))
+        logging.info("Backtest cover rate of the model's side by correction toward the underdog, weeks 5-16, 1999 to date "
+                     "(-99 = the correction favors the favorite): "
+                     + ", ".join(f"{start:g}+: {rate:.1%} ({games})" for start, rate, games in hit_rates if rate is not None))
+        teaser_rates = nfl_signal.teaser_leg_rates(lab_table)
+        logging.info("Wong teaser legs, weeks 5-16: " + "; ".join(
+            f"{label}: {rate:.1%} of {n} since 1999, {recent:.1%} of {m} since 2018" for label, rate, n, recent, m in teaser_rates))
         corrections = nfl_signal.week_corrections(season, week, lab_table)
         for row in final_rows:
             row['correction'] = corrections.get((row['home_team'], row['away_team']))
         spreads = sheet.fetch_draftkings_spreads(season, week)
-        logging.info(f"\n=== PICKS: underdogs on a {'/'.join(f'{k:g}' for k in sheet.KEY_LINES)} line with a correction of at least "
-                     f"{nfl_signal.SIGNAL_THRESHOLD} points toward them, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]} ===")
+        in_pick_weeks = nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]
+        logging.info(f"\n=== PICKS: every underdog the correction favors, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]} "
+                     f"(about 55% in every era tested; 60% is not supported) ===")
         details = {}
         for row in final_rows:
             line, correction = spreads.get((row['home_team'], row['away_team'])), row.get('correction')
@@ -111,17 +116,26 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             home_is_dog = line > 0
             team, points = (row['home_team'], line) if home_is_dog else (row['away_team'], -line)
             details[(row['home_team'], row['away_team'])] = (team, points, correction if home_is_dog else -correction)
-        picks = []
-        if nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]:
-            picks = [key for key, (team, points, toward_dog) in details.items() if nfl_signal.is_pick(points, toward_dog, week)]
-            picks.sort(key=lambda key: -details[key][2])
+        picks = [key for key, (team, points, toward_dog) in details.items() if nfl_signal.is_pick(toward_dog, week)]
+        picks.sort(key=lambda key: -details[key][2])
         for key in picks:
             team, points, toward_dog = details[key]
             logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts toward the underdog")
-        if not nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]:
+        if not in_pick_weeks:
             logging.info(f"No picks: week {week} is outside weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}")
         logging.info(f"{len(picks)} picks this week. The sheet's fair line is the spread plus the correction; "
                      f"the stats-only projections above had no edge against the spread in testing")
+        logging.info("\n=== TEASER LEGS: 6-point Wong teasers through 3 and 7 (pair two legs in one teaser) ===")
+        legs = 0
+        for row in final_rows:
+            line = spreads.get((row['home_team'], row['away_team']))
+            leg = nfl_signal.teaser_leg(line, week) if line is not None else None
+            if leg:
+                side, teased = leg
+                logging.info(f"{row['home_team'] if side == 'home' else row['away_team']} {teased:+g} "
+                             f"({row['away_team']} at {row['home_team']}, spread {abs(line):g})")
+                legs += 1
+        logging.info(f"{legs} teaser legs this week")
         # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections filled in
         for earlier in range(1, week):
             for (home, away), correction in nfl_signal.week_corrections(season, earlier, lab_table).items():
@@ -145,7 +159,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
     try:
         output_path, rows_added, actuals_updated, spreads_filled = sheet.write_projections_spreadsheet(
             final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
-            qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates,
+            qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates, teaser_table=teaser_rates,
         )
         logging.info(
             f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "
