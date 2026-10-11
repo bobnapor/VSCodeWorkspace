@@ -113,10 +113,12 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             key = (row['home_team'], row['away_team'])
             candidates.append((key, toward_dog))
             details[key] = (team, points, toward_dog)
-        picks = nfl_signal.weekly_picks(candidates)
+        picks = nfl_signal.weekly_picks(candidates) if nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1] else []
         for key in picks:
             team, points, toward_dog = details[key]
             logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts")
+        if not picks and not nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]:
+            logging.info(f"No picks: week {week} is outside weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}")
         logging.info(f"{len(picks)} underdog picks this week. The sheet's fair line is the spread plus the correction; "
                      f"the stats-only projections above had no edge against the spread in testing")
         # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections filled in

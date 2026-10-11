@@ -254,6 +254,8 @@ def ridge_margin(columns, alpha=300.0, target='result'):
     def fit_predict(train, test):
         spread = train[columns].std()
         usable = [c for c in columns if spread[c] > 1e-6]  # stats missing in early seasons are constant there
+        if not usable:
+            return np.zeros(len(test))
         fill = train[usable].median()
         scaler = StandardScaler().fit(train[usable].fillna(fill))
         model = Ridge(alpha=alpha).fit(scaler.transform(train[usable].fillna(fill)), train[target])

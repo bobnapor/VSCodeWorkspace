@@ -41,12 +41,14 @@ MANUAL_INPUT_FILL_COLOR = 'FFFF99'
 TABLE_COLUMNS = (LAST_SHEET_COLUMN + 2, LAST_SHEET_COLUMN + 3, LAST_SHEET_COLUMN + 4)   # correction from, cover rate, games
 TABLE_LETTERS = tuple(chr(64 + c) for c in TABLE_COLUMNS)
 TABLE_EDGE_HEADER = 'Correction toward underdog from'
-THRESHOLD_ROW = 7
-PICKS_ROW = 8
-THRESHOLD_LABEL = 'Signal threshold (pts)'
-PICKS_LABEL = 'Picks per week'
-DEFAULT_SIGNAL_THRESHOLD = 0.5
-DEFAULT_PICKS_PER_WEEK = 3
+# Editable settings under the hit-rate table: key -> (label, default, row)
+SETTINGS = {
+    'threshold': ('Signal threshold (pts)', 0.5, 7),
+    'picks': ('Picks per week', 3, 8),
+    'first_week': ('First pick week', 5, 9),
+    'last_week': ('Last pick week', 16, 10),
+}
+SETTINGS_NOTE_ROW = 12
 PREVIOUS_DEFAULT_PICKS_PER_WEEK = 4   # sheets that still hold the old default are moved to the new one
 MAX_QB_FLAG_WIDTH = 40
 MAX_NOTES_WIDTH = 30
@@ -141,7 +143,7 @@ def _hit_rate_table_from(ws):
     return []
 
 
-def _reset_sheet(ws, threshold, picks_per_week, hit_rate_table, through_season):
+def _reset_sheet(ws, settings, hit_rate_table, through_season):
     """Clear the sheet and lay out the header, settings table, formatting and panes from scratch.
 
     Rewriting it every run is what lets an older layout turn into the current one: the games were already read
@@ -176,27 +178,30 @@ def _reset_sheet(ws, threshold, picks_per_week, hit_rate_table, through_season):
         ws.cell(r, edge_col, edge)
         ws.cell(r, rate_col, hit_rate).number_format = '0.0%'
         ws.cell(r, games_col, games)
-    # editable: the correction that flags an underdog on its own, and how many top underdogs a week are always flagged
-    ws.cell(THRESHOLD_ROW, edge_col, THRESHOLD_LABEL).font = Font(bold=True)
-    ws.cell(THRESHOLD_ROW, rate_col, threshold)
-    ws.cell(PICKS_ROW, edge_col, PICKS_LABEL).font = Font(bold=True)
-    ws.cell(PICKS_ROW, rate_col, picks_per_week)
+    # editable settings: the correction that flags an underdog on its own, how many top underdogs a week are always
+    # flagged, and the weeks picks are made in
+    for key, (label, _default, row) in SETTINGS.items():
+        ws.cell(row, edge_col, label).font = Font(bold=True)
+        ws.cell(row, rate_col, settings[key])
     if hit_rate_table:
-        ws.cell(PICKS_ROW + 2, edge_col, f'Table: walk-forward backtest, 2006-{through_season} regular seasons, recomputed every run. '
-                                          f'Break-even at -110 is 52.4%.').alignment = Alignment(wrap_text=False)
+        first, last = settings['first_week'], settings['last_week']
+        ws.cell(SETTINGS_NOTE_ROW, edge_col, f'Table: walk-forward backtest, 2006-{through_season} regular seasons, weeks {first}-{last}, '
+                                              f'recomputed every run. Break-even at -110 is 52.4%.').alignment = Alignment(wrap_text=False)
     _add_conditional_formatting(ws)
 
 
 def _settings_from(ws):
-    """The threshold and picks-per-week the sheet holds, found by their labels since older layouts kept them elsewhere."""
+    """The editable settings the sheet holds, found by their labels since older layouts kept them elsewhere."""
+    labels = {label: key for key, (label, _default, _row) in SETTINGS.items()}
     found = {}
     for row in ws.iter_rows(min_row=1, max_row=30, max_col=40):
         for cell in row:
-            if cell.value in (THRESHOLD_LABEL, PICKS_LABEL):
-                found[cell.value] = ws.cell(cell.row, cell.column + 1).value
-    threshold, picks = found.get(THRESHOLD_LABEL), found.get(PICKS_LABEL)
-    return (DEFAULT_SIGNAL_THRESHOLD if threshold in (None, '') else threshold,
-            DEFAULT_PICKS_PER_WEEK if picks in (None, '', PREVIOUS_DEFAULT_PICKS_PER_WEEK) else picks)
+            if cell.value in labels:
+                found[labels[cell.value]] = ws.cell(cell.row, cell.column + 1).value
+    settings = {key: default if found.get(key) in (None, '') else found[key] for key, (_label, default, _row) in SETTINGS.items()}
+    if settings['picks'] == PREVIOUS_DEFAULT_PICKS_PER_WEEK:
+        settings['picks'] = SETTINGS['picks'][1]
+    return settings
 
 
 def _field_columns(ws):
@@ -414,7 +419,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     wb = _load_or_create_projections_workbook(output_path)
     ws = wb.active
-    threshold, picks_per_week = _settings_from(ws)
+    settings = _settings_from(ws)
     fields = _field_columns(ws)
     # a table that couldn't be recomputed this run keeps what the sheet already holds
     hit_rate_table = [r for r in (hit_rate_table or []) if r[1] is not None] or _hit_rate_table_from(ws)
@@ -526,7 +531,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     # within a week keep the order they were first written in
     records.sort(key=season_order)
 
-    _reset_sheet(ws, threshold, picks_per_week, hit_rate_table, int(year))
+    _reset_sheet(ws, settings, hit_rate_table, int(year))
 
     from openpyxl.styles import Alignment
 
@@ -567,8 +572,10 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         # the week's top picks-per-week or is at least the threshold
         rank_count = f'COUNTIFS({week_range},{c["week"]},{year_range},{c["year"]},{dog_range},">"&{dog})'
         underdog = f'IF({spread}>0,{home_name}&" +"&ABS({spread}),{away_name}&" +"&ABS({spread}))'
+        setting = {key: f'${rate_letter}${row}' for key, (_label, _default, row) in SETTINGS.items()}
+        in_pick_weeks = f'AND(ISNUMBER({c["week"]}),{c["week"]}>={setting["first_week"]},{c["week"]}<={setting["last_week"]})'
         ws.cell(r, COL['pick'],
-                f'=IF({dog}="","",IF(AND({dog}>0,OR({dog}>=${rate_letter}${THRESHOLD_ROW},{rank_count}<${rate_letter}${PICKS_ROW})),{underdog},""))')
+                f'=IF({dog}="","",IF(AND({in_pick_weeks},{dog}>0,OR({dog}>={setting["threshold"]},{rank_count}<{setting["picks"]})),{underdog},""))')
         for key in MANUAL_INPUT_FIELDS:
             ws.cell(r, COL[key]).fill = manual_fill
 
