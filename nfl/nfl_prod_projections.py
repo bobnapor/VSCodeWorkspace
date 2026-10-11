@@ -9,6 +9,7 @@ from datetime import datetime
 
 import numpy as np
 
+import nfl_lab as lab
 import nfl_model as nm
 import nfl_sheet as sheet
 from nfl_injury_features import TEAM_FULL_NAMES
@@ -91,7 +92,8 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
     # The underdog signal: the correction to the spread that the research found worth flagging
     try:
         import nfl_signal
-        corrections = nfl_signal.week_corrections(season, week)
+        lab_table = lab.build_table(lab.ALL_PAIRS, refresh=True)
+        corrections = nfl_signal.week_corrections(season, week, lab_table)
         for row in final_rows:
             row['correction'] = corrections.get((row['home_team'], row['away_team']))
         spreads = sheet.fetch_draftkings_spreads(season, week)
@@ -99,9 +101,6 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         candidates, details = [], {}
         for row in final_rows:
             line, correction = spreads.get((row['home_team'], row['away_team'])), row.get('correction')
-            if line is not None and correction is not None:
-                # the sheet's fair line is the spread moved by the correction, so Side to Cover agrees with the picks
-                row['fair_line'] = round(-line + correction, 1)
             if line is None or correction is None or line == 0:
                 continue
             home_is_dog = line > 0
@@ -116,6 +115,11 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts")
         logging.info(f"{len(picks)} underdog picks this week. The sheet's fair line is the spread plus the correction; "
                      f"the stats-only projections above had no edge against the spread in testing")
+        # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections filled in
+        for earlier in range(1, week):
+            for (home, away), correction in nfl_signal.week_corrections(season, earlier, lab_table).items():
+                final_rows.append({'week': str(earlier), 'year': season, 'home_team': home, 'away_team': away,
+                                   'projected': 0.0, 'actual': None, 'correction': correction, 'backfill': True})
     except Exception as e:
         logging.warning(f"Could not compute the underdog signal: {e}")
 

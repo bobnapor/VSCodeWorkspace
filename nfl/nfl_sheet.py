@@ -45,6 +45,7 @@ THRESHOLD_ROW = 7
 PICKS_ROW = 8
 DEFAULT_SIGNAL_THRESHOLD = 0.5
 DEFAULT_PICKS_PER_WEEK = 3
+PREVIOUS_DEFAULT_PICKS_PER_WEEK = 4   # sheets that still hold the old default are moved to the new one
 SPREADSHEET_COLUMN_WIDTHS = {'R': 16.0, 'S': 18.0}
 OLD_TABLE_HEADER = 'Edge (pts) from'
 
@@ -169,7 +170,7 @@ def _write_hit_rate_table(ws):
     if ws.cell(THRESHOLD_ROW, rate_col).value in (None, ''):
         ws.cell(THRESHOLD_ROW, rate_col, DEFAULT_SIGNAL_THRESHOLD)  # editable: the correction that flags an underdog on its own
     ws.cell(PICKS_ROW, edge_col, 'Picks per week').font = Font(bold=True)
-    if ws.cell(PICKS_ROW, rate_col).value in (None, ''):
+    if ws.cell(PICKS_ROW, rate_col).value in (None, '', PREVIOUS_DEFAULT_PICKS_PER_WEEK):
         ws.cell(PICKS_ROW, rate_col, DEFAULT_PICKS_PER_WEEK)  # editable: the week's top underdogs by correction are always flagged
 
 
@@ -342,8 +343,9 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     The workbook acts as a running log for the season: each run adds its week's games in week order, so
     a week run after later weeks is inserted after the weeks before it and ahead of the weeks that follow.
-    A game already in the sheet (same week, year and teams) keeps its original fair line, since
-    that is the line that was bet on. Actual score differences are refreshed for every game in the sheet
+    A game already in the sheet (same week, year and teams) keeps its stats-only fair line until both its spread
+    and its model correction are known; from then on the fair line is the spread moved by the correction, so
+    Side to Cover agrees with the underdog signal. Actual score differences are refreshed for every game in the sheet
     that has since been played, using `actual_lookup` ({(week, year, home, away): difference}) plus the
     rows passed in. Blank spreads are filled from `spread_fetcher(year, week)` (DraftKings via Action
     Network in production); a spread already in the sheet is never replaced, and notes are never touched.
@@ -418,11 +420,13 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 if game_key(record['week'], record['year'], record['home'], record['away']) == key and record['correction'] in (None, ''):
                     record['correction'] = row.get('correction')
             continue
+        if row.get('backfill'):  # corrections for earlier weeks fill games already in the sheet but never add new ones
+            continue
         existing_keys.add(key)
         records.append({
             'week': week_value(row['week']), 'year': int(row['year']),
             'home': row['home_team'], 'away': row['away_team'],
-            'fair_line': row['fair_line'] if row.get('fair_line') is not None else fair_line_as_home(float(row['projected'])), 'spread': None,
+            'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None,
             'actual': actuals.get(key), 'notes': None, 'qb_flag': None, 'correction': row.get('correction'),
         })
         added += 1
@@ -456,6 +460,13 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             if line is not None:
                 record['spread'] = line
                 spreads_filled += 1
+
+    # The fair line is the spread moved by the correction, so Side to Cover always agrees with the underdog signal.
+    # Games without both numbers keep the stats-only line they were first written with.
+    for record in records:
+        spread, correction = record['spread'], record['correction']
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (spread, correction)):
+            record['fair_line'] = round(-spread + correction, 2)
 
     def season_order(record):
         week_number = translate_week_number(str(record['week']), record['year'])
