@@ -11,6 +11,7 @@ import pandas as pd
 
 import nfl_lab as lab
 from nfl_research_features import ALL, SLIM, add_dog_columns, pair_features
+from nfl_sheet import KEY_LINES
 
 BREAK_EVEN = 0.5238
 QUANTILES = (0.60, 0.70, 0.80, 0.85, 0.90, 0.95)
@@ -213,10 +214,58 @@ def production_rule_check():
     print('picks per week-slate: %s' % per_week.value_counts().sort_index().to_dict())
 
 
+def side_models(table):
+    """Is the favorite side really edgeless, or only so for a model that was found on underdogs?
+
+    Besides the pooled model, fits models on subsets of games (key-number lines only, whole-number lines only, and
+    games with a big favorite) and evaluates both sides on key lines and on all lines.
+    """
+    full = lab.PBP_FEATURES + lab.BOX_FEATURES + ['elo_diff', 'rest_diff']
+    shape = ['abs_spread', 'total_line', 'neutral']
+    dog_table = add_dog_columns(table, ['elo_diff', 'rest_diff'] + full)
+    dog_table['line'] = dog_table['abs_spread']
+    dog_table['key'] = dog_table['line'].isin(KEY_LINES)
+    dog_table['whole'] = dog_table['line'] % 1 == 0
+    columns = ['dog__' + c for c in full] + shape
+    subsets = {
+        'all games': lambda t: np.ones(len(t), bool),
+        'key lines only': lambda t: t['key'].to_numpy(),
+        'whole-number lines only': lambda t: t['whole'].to_numpy(),
+        'line >= 3 only': lambda t: (t['line'] >= 3).to_numpy(),
+    }
+    print('=== models trained on subsets of games; picks on each side, weeks 5-16 (win rate disc/hold, n) ===')
+    for name, mask_fn in subsets.items():
+        for alpha in (3000.0, 10000.0, 30000.0):
+            inner = lab.ridge_margin(columns, alpha=alpha, target='y_dog')
+            fn = lambda train, test, inner=inner, mask_fn=mask_fn: inner(train[mask_fn(train)], test)
+            frame = lab.walk_forward(dog_table, fn)
+            f = frame[(frame['resid'] != 0) & frame['week'].between(5, 16) & (frame['game_type'] == 'REG')].copy()
+            f['win_dog'] = f['y_dog'] > 0
+            cells = []
+            for side, sign in (('dog', 1.0), ('fav', -1.0)):
+                for where, wmask in (('key', f['key']), ('any', pd.Series(True, index=f.index))):
+                    for cut in (0.5, 1.0):
+                        g = f[wmask & (sign * f['pred'] >= cut)]
+                        win = g['win_dog'] if sign > 0 else ~g['win_dog']
+                        d, h = g['season'] <= lab.DISCOVERY_END, g['season'] > lab.DISCOVERY_END
+                        cells.append('%s/%s>=%.1f %.3f/%.3f (n=%d,%d)' % (side, where, cut, win[d].mean() if d.any() else float('nan'),
+                                                                       win[h].mean() if h.any() else float('nan'), d.sum(), h.sum()))
+            print('%-24s a=%-6g %s' % (name, alpha, ' | '.join(cells)))
+        print()
+
+
+def favorites_main():
+    table = lab.default_table()
+    table = table[table['season'] >= 2002]
+    side_models(table)
+
+
 if __name__ == '__main__':
     import sys
 
     if 'production' in sys.argv[1:]:
         production_rule_check()
+    elif 'favorites' in sys.argv[1:]:
+        favorites_main()
     else:
         main()
