@@ -54,8 +54,11 @@ python nfl_prod_projections.py
 
 `nfl_research_validate.py` is the honest check of all of the above (October 2026): it scores the 1999-2005 seasons, which no research step had used, with a model fitted on 2006-2019. The key-number rule failed there (51.5%), the quarterback-change filter helped only there, and the correction's information turned out stable in every era (correlation with the cover margin 0.06-0.08), which supports about 55% and not 60%. The 4-stat model above passed a pre-registered test on information (0.10-0.11 versus 0.06-0.08 in the two eras its selection never saw) but its picks also land at about 54-55%. It also tests the published Wong teaser rule (legs about 75% in every era). See `nfl/README.md` for the full write-up.
 
+`nfl_research_data.py` tests data the model does not use (October 2026), each against a rule fixed before running: 15 seasons of opening and closing lines from Sportsbook Reviews Online's free archive (`nfl_market_history.py` downloads and parses them), betting at the open instead of the close, a rating of each game's actual starting quarterback, record and luck, pass rush and coverage (QB hits and passes defended), team popularity (primetime games), and retuned rating memory. None added information beyond the closing line, and none produced an edge on favorites: public information is already in the line.
+
 ```
 cd nfl
+python nfl_research_data.py open early qb luck pressure popularity ratings
 python nfl_research_validate.py
 python nfl_research_validate.py models
 python nfl_research_validate.py threshold
