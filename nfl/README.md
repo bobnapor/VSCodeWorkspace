@@ -52,7 +52,7 @@ For each (own stat, allowed stat) pair, each team gets a **pre-game** rating bui
 
 ### 3.3 Model A: the stats-only margin projection (`nfl_model.py`, the original deliverable)
 
-Ridge regression (alpha 300) of the home margin on ratings for **yards, turnovers, first downs, points and plays** (offense and defense), a margin Elo, rest-day difference, neutral site and quarterback features. Trains on the last 12 seasons; projections average `BOOTSTRAP_RUNS` bootstrap fits. Margin error (2014-2026): 10.19 points (the closing spread 9.94). **It does not beat the spread** (about 51% against it). It is only a logged reference and the fallback fair line.
+Ridge regression (alpha 300) of the home margin on ratings for **yards, turnovers, first downs, points and plays** (offense and defense), a margin Elo, rest-day difference, neutral site and quarterback features. Trains on the last 12 seasons; projections average `BOOTSTRAP_RUNS` (10,000) bootstrap fits, each the same ridge refitted on a resample of the training games drawn with replacement (Mean = their average, StdDev = their spread; `nm.bootstrap_projection` does this in numpy, matching the scikit-learn fit to 1e-13 points, in about 70 seconds). Margin error (2014-2026): 10.19 points (the closing spread 9.94). **It does not beat the spread** (about 51% against it). It is only a logged reference and the fallback fair line.
 
 ### 3.4 Model B: the correction model (`nfl_signal.py`, the thing the picks come from)
 
@@ -66,7 +66,7 @@ Ridge regression, **alpha 10000**, on the cover margin (`resid = result - spread
 ### 3.6 Weekly runner (`nfl_prod_projections.py`)
 
 1. Load/refresh nflverse data, pick the next unplayed week (or `PREDICT_YEAR` / `PREDICT_WEEK` overrides in the `__main__` block).
-2. Model A projections (logged to `C:/Users/Bobby/nfl_predictions_<timestamp>.txt` and the console).
+2. Model A projections (logged to `C:/Users/Bobby/nfl_predictions_<timestamp>.txt` and the console). The whole run is logged in 8 numbered, timed steps, with bootstrap progress every 10%; a full run takes about 2 minutes.
 3. Build the full research table, compute the hit-rate table (`backtest_hit_rates`, about 30 s) and the teaser-leg rates, this week's corrections, and corrections for earlier weeks already in the sheet (backfill; never adds games).
 4. Fetch DraftKings spreads (fallback: DraftKings NJ, DK PA, consensus, other books, opener; the book used is logged), log the week's picks and teaser legs.
 5. Append a timestamped snapshot of lines and betting splits to `data_cache/line_log.csv`.
@@ -162,7 +162,7 @@ Key framework functions in `nfl_lab.py`: `default_table()` (cached full table, 1
 
 - Windows; **32-bit Python 3.8.5**; pandas 2.0.3, numpy 1.24.4, scikit-learn 0.24.2, scipy 1.5.2, openpyxl, requests. Not installed: lightgbm, xgboost, statsmodels, torch, pymc.
 - Run scripts from inside `nfl/`. `lab_table_default.pkl` caches the research table; delete it (or `default_table(refresh=True)`) after changing rating code.
-- The workbook path comes from `nfl_sheet.get_desktop_path()` (OneDrive-aware); tests should monkeypatch it to a temp folder and copy the real sheet there. The runner's log path (`C:/Users/Bobby/...`) is hardcoded. `BOOTSTRAP_RUNS` in `nfl_prod_projections.py` is the owner's setting (he raised it to 10000 locally).
+- The workbook path comes from `nfl_sheet.get_desktop_path()` (OneDrive-aware); tests should monkeypatch it to a temp folder and copy the real sheet there. The runner's log path (`C:/Users/Bobby/...`) is hardcoded. `BOOTSTRAP_RUNS` in `nfl_prod_projections.py` is 10,000 (the owner's choice, matching his earlier 10,000-run regression approach); pass `num_runs` to `main()` for quick test runs.
 
 ## 10. Suggested next steps
 
