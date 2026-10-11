@@ -36,11 +36,15 @@ CORRECTION_COLUMN = 15
 CORRECTION_HEADER = 'Model Correction (as Home)'
 SIGNAL_COLUMN = 16
 SIGNAL_HEADER = 'Underdog Signal'
-LAST_SHEET_COLUMN = SIGNAL_COLUMN
+DOG_CORRECTION_COLUMN = 17
+DOG_CORRECTION_HEADER = 'Underdog-Side Correction'
+LAST_SHEET_COLUMN = DOG_CORRECTION_COLUMN
 # Settings and the edge/hit-rate lookup table sit to the right of the data, in columns R:S
 TABLE_COLUMNS = (18, 19)
 THRESHOLD_ROW = 7
+PICKS_ROW = 8
 DEFAULT_SIGNAL_THRESHOLD = 0.5
+DEFAULT_PICKS_PER_WEEK = 4
 SPREADSHEET_COLUMN_WIDTHS = {'R': 16.0, 'S': 18.0}
 OLD_TABLE_HEADER = 'Edge (pts) from'
 
@@ -139,7 +143,8 @@ def _new_projections_workbook():
 def _ensure_qb_flag_header(ws):
     from openpyxl.styles import Alignment, Border, Font, Side
 
-    for column, header in ((QB_FLAG_COLUMN, QB_FLAG_HEADER), (CORRECTION_COLUMN, CORRECTION_HEADER), (SIGNAL_COLUMN, SIGNAL_HEADER)):
+    for column, header in ((QB_FLAG_COLUMN, QB_FLAG_HEADER), (CORRECTION_COLUMN, CORRECTION_HEADER), (SIGNAL_COLUMN, SIGNAL_HEADER),
+                           (DOG_CORRECTION_COLUMN, DOG_CORRECTION_HEADER)):
         cell = ws.cell(1, column)
         if cell.value != header:
             cell.value = header
@@ -162,7 +167,10 @@ def _write_hit_rate_table(ws):
         ws.cell(r, rate_col, hit_rate).number_format = '0%'
     ws.cell(THRESHOLD_ROW, edge_col, 'Signal threshold (pts)').font = Font(bold=True)
     if ws.cell(THRESHOLD_ROW, rate_col).value in (None, ''):
-        ws.cell(THRESHOLD_ROW, rate_col, DEFAULT_SIGNAL_THRESHOLD)  # editable: the correction needed to flag an underdog
+        ws.cell(THRESHOLD_ROW, rate_col, DEFAULT_SIGNAL_THRESHOLD)  # editable: the correction that flags an underdog on its own
+    ws.cell(PICKS_ROW, edge_col, 'Picks per week').font = Font(bold=True)
+    if ws.cell(PICKS_ROW, rate_col).value in (None, ''):
+        ws.cell(PICKS_ROW, rate_col, DEFAULT_PICKS_PER_WEEK)  # editable: the week's top underdogs by correction are always flagged
 
 
 def _ensure_signal_formatting(ws):
@@ -326,6 +334,7 @@ def _autosize_columns(ws, records):
     ws.column_dimensions[get_column_letter(QB_FLAG_COLUMN)].width = min(max(flag_lengths, default=0) + 3, 90) if flag_lengths else 16
     ws.column_dimensions[get_column_letter(CORRECTION_COLUMN)].width = 14
     ws.column_dimensions[get_column_letter(SIGNAL_COLUMN)].width = max([len(name) for name in team_names] + [len(SIGNAL_HEADER)], default=16) + 3
+    ws.column_dimensions[get_column_letter(DOG_CORRECTION_COLUMN)].width = 14
 
 
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None):
@@ -479,9 +488,12 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         ws.cell(r, 13, record['notes'])
         ws.cell(r, QB_FLAG_COLUMN, record['qb_flag'])
         ws.cell(r, CORRECTION_COLUMN, record['correction']).number_format = '0.0'
-        # flag the underdog when the correction points that way by at least the threshold in S7
-        threshold = f'${rate_letter}${THRESHOLD_ROW}'
-        ws.cell(r, SIGNAL_COLUMN, f'=IF(OR(F{r}="",O{r}=""),"",IF(AND(F{r}>0,O{r}>={threshold}),C{r},IF(AND(F{r}<0,O{r}<=-{threshold}),D{r},"")))')
+        # Q: the correction measured toward the underdog (positive = the model likes the underdog more than the spread does)
+        ws.cell(r, DOG_CORRECTION_COLUMN, f'=IF(OR(F{r}="",O{r}="",F{r}=0),"",ROUND(IF(F{r}>0,O{r},-O{r}),3))').number_format = '0.0'
+        # P: flag the underdog when Q is positive and either ranks in the week's top S8 or is at least the threshold in S7
+        threshold, picks = f'${rate_letter}${THRESHOLD_ROW}', f'${rate_letter}${PICKS_ROW}'
+        rank_count = f'COUNTIFS($A$2:$A$1000,A{r},$B$2:$B$1000,B{r},$Q$2:$Q$1000,">"&Q{r})'
+        ws.cell(r, SIGNAL_COLUMN, f'=IF(Q{r}="","",IF(AND(Q{r}>0,OR(Q{r}>={threshold},{rank_count}<{picks})),IF(F{r}>0,C{r},D{r}),""))')
         for col in MANUAL_INPUT_COLUMNS:
             ws.cell(r, col).fill = manual_fill
 

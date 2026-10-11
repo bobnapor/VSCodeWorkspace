@@ -95,18 +95,23 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         for row in final_rows:
             row['correction'] = corrections.get((row['home_team'], row['away_team']))
         spreads = sheet.fetch_draftkings_spreads(season, week)
-        logging.info(f"\n=== UNDERDOG SIGNALS (correction of at least {nfl_signal.SIGNAL_THRESHOLD} points toward the underdog) ===")
-        flagged = 0
+        logging.info(f"\n=== UNDERDOG PICKS (top {nfl_signal.PICKS_PER_WEEK} corrections toward the underdog, plus any of at least {nfl_signal.SIGNAL_THRESHOLD} points) ===")
+        candidates, details = [], {}
         for row in final_rows:
             line, correction = spreads.get((row['home_team'], row['away_team'])), row.get('correction')
             if line is None or correction is None or line == 0:
                 continue
             home_is_dog = line > 0
-            if (home_is_dog and correction >= nfl_signal.SIGNAL_THRESHOLD) or (not home_is_dog and correction <= -nfl_signal.SIGNAL_THRESHOLD):
-                team, points = (row['home_team'], line) if home_is_dog else (row['away_team'], -line)
-                logging.info(f"{team} +{points:g} ({row['away_team']} at {row['home_team']}), correction {abs(correction):.1f} pts")
-                flagged += 1
-        logging.info(f"{flagged} underdog signals this week")
+            team, points = (row['home_team'], line) if home_is_dog else (row['away_team'], -line)
+            toward_dog = correction if home_is_dog else -correction
+            key = (row['home_team'], row['away_team'])
+            candidates.append((key, toward_dog))
+            details[key] = (team, points, toward_dog)
+        picks = nfl_signal.weekly_picks(candidates)
+        for key in picks:
+            team, points, toward_dog = details[key]
+            logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts")
+        logging.info(f"{len(picks)} underdog picks this week")
     except Exception as e:
         logging.warning(f"Could not compute the underdog signal: {e}")
 
