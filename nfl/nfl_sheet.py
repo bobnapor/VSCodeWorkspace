@@ -15,14 +15,16 @@ import requests
 # The table behind the Backtest ATS Win % column (how often the model's side covered, by size of the correction toward
 # the underdog) is computed each run by nfl_signal.backtest_hit_rates and written to the sheet; nothing is typed in.
 HIT_RATE_HEADER = 'Backtest ATS Win % (at this edge)'
-HIT_RATE_TABLE_ROWS = 5   # rows 2-6, just above the two settings
+HIT_RATE_TABLE_ROWS = 5   # rows 2-6, just above the settings
+# Spreads that sit exactly on a key number; the pick rule only looks at underdogs on these (see nfl_signal.py)
+KEY_LINES = (3.0, 6.0, 7.0, 10.0, 14.0)
 
 # Column order: what you act on first (week, teams, spread, the pick), then the model's numbers, then the result,
 # with the long text (QB flags, notes) and the bookkeeping columns last so the sheet fits on one screen.
 # The sheet is laid out again from these every run and read back by header text, so older layouts migrate.
 LAYOUT = (
     ('week', 'Week'), ('home', 'Home Team'), ('away', 'Away Team'), ('spread', 'Spread (as Home)'),
-    ('pick', 'Underdog Signal'), ('dog_correction', 'Correction Toward Underdog'), ('hit_rate', HIT_RATE_HEADER),
+    ('pick', 'Pick'), ('dog_correction', 'Correction Toward Underdog'), ('hit_rate', HIT_RATE_HEADER),
     ('fair_line', 'Fair Line (as Home)'), ('fair_vs_spread', 'Fair Line vs Spread'), ('side', 'Side to Cover'),
     ('actual', 'Actual Score Difference (as Home)'), ('covering', 'Covering Team'), ('result', 'Result'),
     ('qb_flag', 'QB Injury Flag'), ('notes', 'Notes'), ('year', 'Year'), ('correction', 'Model Correction (as Home)'),
@@ -31,25 +33,25 @@ COL = {key: index for index, (key, _) in enumerate(LAYOUT, start=1)}
 LETTER = {key: chr(64 + index) for key, index in COL.items()}   # fewer than 26 columns, so A-Z is enough
 LAST_SHEET_COLUMN = len(LAYOUT)
 # Names the columns went by in earlier layouts, for reading older sheets
-LEGACY_HEADERS = {'Cover Probability (Side to Cover)': 'hit_rate', 'Underdog-Side Correction': 'dog_correction'}
+LEGACY_HEADERS = {'Cover Probability (Side to Cover)': 'hit_rate', 'Underdog-Side Correction': 'dog_correction', 'Underdog Signal': 'pick'}
 READ_HEADERS = {**{header: key for key, header in LAYOUT}, **LEGACY_HEADERS}
 REQUIRED_FIELDS = ('week', 'year', 'home', 'away', 'fair_line', 'spread', 'actual', 'notes')
 # Columns filled in by hand
 MANUAL_INPUT_FIELDS = ('spread', 'actual', 'notes')
 MANUAL_INPUT_FILL_COLOR = 'FFFF99'
-# Settings and the edge/hit-rate lookup table sit one column to the right of the data
-TABLE_COLUMNS = (LAST_SHEET_COLUMN + 2, LAST_SHEET_COLUMN + 3, LAST_SHEET_COLUMN + 4)   # correction from, cover rate, games
+# Settings and the hit-rate lookup table sit one column to the right of the data: correction from, then the cover rate
+# and games on key-number lines, then the same for other lines
+TABLE_COLUMNS = tuple(LAST_SHEET_COLUMN + offset for offset in range(2, 7))
 TABLE_LETTERS = tuple(chr(64 + c) for c in TABLE_COLUMNS)
 TABLE_EDGE_HEADER = 'Correction toward underdog from'
+TABLE_HEADERS = (TABLE_EDGE_HEADER, 'Key-line ATS Win %', 'Key-line games', 'Other-line ATS Win %', 'Other-line games')
 # Editable settings under the hit-rate table: key -> (label, default, row)
 SETTINGS = {
-    'threshold': ('Signal threshold (pts)', 0.5, 7),
-    'picks': ('Picks per week', 3, 8),
-    'first_week': ('First pick week', 5, 9),
-    'last_week': ('Last pick week', 16, 10),
+    'threshold': ('Minimum correction (pts)', 0.25, 7),
+    'first_week': ('First pick week', 5, 8),
+    'last_week': ('Last pick week', 16, 9),
 }
-SETTINGS_NOTE_ROW = 12
-PREVIOUS_DEFAULT_PICKS_PER_WEEK = 4   # sheets that still hold the old default are moved to the new one
+SETTINGS_NOTE_ROW = 11
 MAX_QB_FLAG_WIDTH = 40
 MAX_NOTES_WIDTH = 30
 MIN_NOTES_WIDTH = 24
@@ -131,15 +133,16 @@ def _add_conditional_formatting(ws):
 
 
 def _hit_rate_table_from(ws):
-    """The cover-rate table the sheet already holds, [(correction from, cover rate, games)], for runs that can't recompute it.
+    """The cover-rate table the sheet already holds, for runs that can't recompute it.
 
-    Only rows that carry a game count are taken, which leaves out the typed-in tables older versions wrote.
+    Rows are (correction from, key-line rate, key-line games, other-line rate, other-line games).  Only tables with all
+    five columns are taken, which leaves out the older layouts.
     """
     for row in ws.iter_rows(min_row=1, max_row=1, max_col=40):
         for cell in row:
-            if cell.value == TABLE_EDGE_HEADER:
-                rows = [tuple(ws.cell(r, cell.column + i).value for i in range(3)) for r in range(2, 2 + HIT_RATE_TABLE_ROWS)]
-                return [r for r in rows if isinstance(r[2], (int, float)) and isinstance(r[1], (int, float))]
+            if cell.value == TABLE_EDGE_HEADER and ws.cell(1, cell.column + 4).value == TABLE_HEADERS[4]:
+                rows = [tuple(ws.cell(r, cell.column + i).value for i in range(5)) for r in range(2, 2 + HIT_RATE_TABLE_ROWS)]
+                return [r for r in rows if isinstance(r[0], (int, float))]
     return []
 
 
@@ -148,7 +151,8 @@ def _reset_sheet(ws, settings, hit_rate_table, through_season):
 
     Rewriting it every run is what lets an older layout turn into the current one: the games were already read
     back by header text, and the formulas are written again for wherever the columns now are.
-    `hit_rate_table` is [(correction from, cover rate, games)] for the Backtest ATS Win % column.
+    `hit_rate_table` is [(correction from, key-line rate, key-line games, other-line rate, other-line games)] for the
+    Backtest ATS Win % column.
     """
     from openpyxl.formatting.formatting import ConditionalFormattingList
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -168,25 +172,27 @@ def _reset_sheet(ws, settings, hit_rate_table, through_season):
         if key in MANUAL_INPUT_FIELDS:
             cell.fill = manual_fill
 
-    edge_col, rate_col, games_col = TABLE_COLUMNS
-    for col, title in ((edge_col, TABLE_EDGE_HEADER), (rate_col, 'Backtest ATS Win %'), (games_col, 'Games')):
+    edge_col, key_rate_col = TABLE_COLUMNS[0], TABLE_COLUMNS[1]
+    for col, title in zip(TABLE_COLUMNS, TABLE_HEADERS):
         cell = ws.cell(1, col, title)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.border = Border(bottom=Side(style='medium'))
-    for r, (edge, hit_rate, games) in enumerate(hit_rate_table[:HIT_RATE_TABLE_ROWS], start=2):
-        ws.cell(r, edge_col, edge)
-        ws.cell(r, rate_col, hit_rate).number_format = '0.0%'
-        ws.cell(r, games_col, games)
-    # editable settings: the correction that flags an underdog on its own, how many top underdogs a week are always
-    # flagged, and the weeks picks are made in
+    for r, row in enumerate(hit_rate_table[:HIT_RATE_TABLE_ROWS], start=2):
+        for col, value in zip(TABLE_COLUMNS, row):
+            cell = ws.cell(r, col, value)
+            if col in (TABLE_COLUMNS[1], TABLE_COLUMNS[3]):
+                cell.number_format = '0.0%'
+    # editable settings: the correction toward the underdog a game needs, and the weeks picks are made in
     for key, (label, _default, row) in SETTINGS.items():
         ws.cell(row, edge_col, label).font = Font(bold=True)
-        ws.cell(row, rate_col, settings[key])
+        ws.cell(row, key_rate_col, settings[key])
     if hit_rate_table:
         first, last = settings['first_week'], settings['last_week']
         ws.cell(SETTINGS_NOTE_ROW, edge_col, f'Table: walk-forward backtest, 2006-{through_season} regular seasons, weeks {first}-{last}, '
                                               f'recomputed every run. Break-even at -110 is 52.4%.').alignment = Alignment(wrap_text=False)
+        ws.cell(SETTINGS_NOTE_ROW + 1, edge_col, f'Key lines are spreads of {", ".join(f"{k:g}" for k in KEY_LINES)}. '
+                                                  f'A game is picked when its line is a key line and the correction reaches the minimum.')
     _add_conditional_formatting(ws)
 
 
@@ -198,10 +204,7 @@ def _settings_from(ws):
         for cell in row:
             if cell.value in labels:
                 found[labels[cell.value]] = ws.cell(cell.row, cell.column + 1).value
-    settings = {key: default if found.get(key) in (None, '') else found[key] for key, (_label, default, _row) in SETTINGS.items()}
-    if settings['picks'] == PREVIOUS_DEFAULT_PICKS_PER_WEEK:
-        settings['picks'] = SETTINGS['picks'][1]
-    return settings
+    return {key: default if found.get(key) in (None, '') else found[key] for key, (_label, default, _row) in SETTINGS.items()}
 
 
 def _field_columns(ws):
@@ -371,7 +374,7 @@ def _autosize_columns(ws, records):
             width = max(min(width, MAX_NOTES_WIDTH), MIN_NOTES_WIDTH)
         widths[key] = width
         ws.column_dimensions[get_column_letter(col)].width = width
-    for col, width in zip(TABLE_COLUMNS, (24.0, 14.0, 8.0)):
+    for col, width in zip(TABLE_COLUMNS, (24.0, 12.0, 11.0, 12.0, 11.0)):
         ws.column_dimensions[get_column_letter(col)].width = width
 
     # Header row tall enough for the longest wrapped header; data rows tall enough for wrapped flags and notes
@@ -499,12 +502,16 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 fetched_flags[week_number] = qb_flag_fetcher(int(year), week_number)
             record['qb_flag'] = fetched_flags[week_number].get((record['home'], record['away']))
 
-    # Fill blank spreads from the sportsbook feed; a spread already in the sheet is never replaced
+    # Fill blank spreads from the sportsbook feed; a spread already in the sheet is never replaced, but a
+    # game that has not been played yet is checked against the current line, since a pick only holds at its number
     spreads_filled = 0
     if spread_fetcher:
         fetched_weeks = {}
         for record in records:
-            if record['spread'] not in (None, '') or not str(record['week']).isdigit():
+            if not str(record['week']).isdigit():
+                continue
+            has_spread = record['spread'] not in (None, '')
+            if has_spread and record['actual'] not in (None, ''):
                 continue
             week_number = int(record['week'])
             if week_number > get_last_regular_season_week(record['year']):
@@ -512,9 +519,14 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             if week_number not in fetched_weeks:
                 fetched_weeks[week_number] = spread_fetcher(int(year), week_number)
             line = fetched_weeks[week_number].get((record['home'], record['away']))
-            if line is not None:
+            if line is None:
+                continue
+            if not has_spread:
                 record['spread'] = line
                 spreads_filled += 1
+            elif line != record['spread']:
+                logging.warning(f"Week {week_number} {record['away']} at {record['home']}: the sheet has a spread of {record['spread']:g} "
+                                f"but the current line is {line:g}; any pick on this game holds only at the line you can bet")
 
     # The fair line is the spread moved by the correction, so Side to Cover always agrees with the underdog signal.
     # Games without both numbers keep the stats-only line they were first written with.
@@ -537,14 +549,15 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     centered = ('week', 'year', 'spread', 'dog_correction', 'hit_rate', 'fair_line', 'fair_vs_spread', 'actual', 'result', 'correction')
     wrapped = ('qb_flag', 'notes')
-    week_range, year_range, dog_range = (f'${LETTER[key]}$2:${LETTER[key]}${FORMAT_LAST_ROW}' for key in ('week', 'year', 'dog_correction'))
-    edge_letter, rate_letter = TABLE_LETTERS[:2]
+    edge_letter, key_rate_letter, other_rate_letter = TABLE_LETTERS[0], TABLE_LETTERS[1], TABLE_LETTERS[3]
     last_table_row = HIT_RATE_TABLE_ROWS + 1
+    setting = {key: f'${TABLE_LETTERS[1]}${row}' for key, (_label, _default, row) in SETTINGS.items()}
 
     for r, record in enumerate(records, start=2):
         c = {key: f'{letter}{r}' for key, letter in LETTER.items()}
         home_name, away_name = _nickname(c['home']), _nickname(c['away'])
         spread, actual, dog = c['spread'], c['actual'], c['dog_correction']
+        on_key_line = 'OR(' + ','.join(f'ABS({spread})={k:g}' for k in KEY_LINES) + ')'
 
         ws.cell(r, COL['week'], record['week'])
         ws.cell(r, COL['year'], record['year'])
@@ -560,22 +573,22 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 f'=IF(OR({spread}="",{actual}=""),"",IF({actual}+{spread}=0,"Push",IF(({actual}+{spread})>0,{home_name},{away_name})))')
         ws.cell(r, COL['result'],
                 f'=IF({c["covering"]}="","",IF({c["covering"]}="Push","Push",IF({c["covering"]}={c["side"]},"Win","Loss")))')
+        # how often the model's side covered historically at this size of correction, on key-number lines or on others
+        lookup = lambda rate_letter: f'LOOKUP({dog},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row})'
         ws.cell(r, COL['hit_rate'],
-                f'=IF({dog}="","",IFERROR(LOOKUP({dog},${edge_letter}$2:${edge_letter}${last_table_row},${rate_letter}$2:${rate_letter}${last_table_row}),""))').number_format = '0%'
+                f'=IF({dog}="","",IFERROR(IF({on_key_line},{lookup(key_rate_letter)},{lookup(other_rate_letter)}),""))').number_format = '0%'
         ws.cell(r, COL['notes'], record['notes'])
         ws.cell(r, COL['qb_flag'], record['qb_flag'])
         ws.cell(r, COL['correction'], record['correction']).number_format = '0.0'
         # the correction measured toward the underdog (positive = the model likes the underdog more than the spread does)
         ws.cell(r, COL['dog_correction'],
                 f'=IF(OR({spread}="",{c["correction"]}="",{spread}=0),"",ROUND(IF({spread}>0,{c["correction"]},-{c["correction"]}),3))').number_format = '0.0'
-        # flag the underdog, shown with its spread, when the correction toward it is positive and either ranks in
-        # the week's top picks-per-week or is at least the threshold
-        rank_count = f'COUNTIFS({week_range},{c["week"]},{year_range},{c["year"]},{dog_range},">"&{dog})'
+        # the pick: in the pick weeks, the underdog's line is a key number, and the correction toward the underdog
+        # is positive and at least the minimum; shown with the underdog's spread
         underdog = f'IF({spread}>0,{home_name}&" +"&ABS({spread}),{away_name}&" +"&ABS({spread}))'
-        setting = {key: f'${rate_letter}${row}' for key, (_label, _default, row) in SETTINGS.items()}
         in_pick_weeks = f'AND(ISNUMBER({c["week"]}),{c["week"]}>={setting["first_week"]},{c["week"]}<={setting["last_week"]})'
         ws.cell(r, COL['pick'],
-                f'=IF({dog}="","",IF(AND({in_pick_weeks},{dog}>0,OR({dog}>={setting["threshold"]},{rank_count}<{setting["picks"]})),{underdog},""))')
+                f'=IF({dog}="","",IF(AND({in_pick_weeks},{on_key_line},{dog}>0,{dog}>={setting["threshold"]}),{underdog},""))')
         for key in MANUAL_INPUT_FIELDS:
             ws.cell(r, COL[key]).fill = manual_fill
 

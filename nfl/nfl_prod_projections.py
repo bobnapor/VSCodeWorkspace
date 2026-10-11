@@ -95,31 +95,32 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         import nfl_signal
         lab_table = lab.build_table(lab.ALL_PAIRS, refresh=True)
         hit_rates = nfl_signal.backtest_hit_rates(lab_table, season)
-        logging.info("Backtest cover rate by correction toward the underdog (walk-forward, 2006 to date): "
-                     + ", ".join(f"{start:g}+: {rate:.1%} ({games})" for start, rate, games in hit_rates if rate is not None))
+        logging.info("Backtest cover rate by correction toward the underdog, weeks 5-16, 2006 to date (key lines | other lines): "
+                     + ", ".join(f"{start:g}+: {kr:.1%} ({kg}) | {orr:.1%} ({og})" for start, kr, kg, orr, og in hit_rates if kr is not None and orr is not None))
         corrections = nfl_signal.week_corrections(season, week, lab_table)
         for row in final_rows:
             row['correction'] = corrections.get((row['home_team'], row['away_team']))
         spreads = sheet.fetch_draftkings_spreads(season, week)
-        logging.info(f"\n=== UNDERDOG PICKS (top {nfl_signal.PICKS_PER_WEEK} corrections toward the underdog, plus any of at least {nfl_signal.SIGNAL_THRESHOLD} points) ===")
-        candidates, details = [], {}
+        logging.info(f"\n=== PICKS: underdogs on a {'/'.join(f'{k:g}' for k in sheet.KEY_LINES)} line with a correction of at least "
+                     f"{nfl_signal.SIGNAL_THRESHOLD} points toward them, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]} ===")
+        details = {}
         for row in final_rows:
             line, correction = spreads.get((row['home_team'], row['away_team'])), row.get('correction')
             if line is None or correction is None or line == 0:
                 continue
             home_is_dog = line > 0
             team, points = (row['home_team'], line) if home_is_dog else (row['away_team'], -line)
-            toward_dog = correction if home_is_dog else -correction
-            key = (row['home_team'], row['away_team'])
-            candidates.append((key, toward_dog))
-            details[key] = (team, points, toward_dog)
-        picks = nfl_signal.weekly_picks(candidates) if nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1] else []
+            details[(row['home_team'], row['away_team'])] = (team, points, correction if home_is_dog else -correction)
+        picks = []
+        if nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]:
+            picks = [key for key, (team, points, toward_dog) in details.items() if nfl_signal.is_pick(points, toward_dog, week)]
+            picks.sort(key=lambda key: -details[key][2])
         for key in picks:
             team, points, toward_dog = details[key]
-            logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts")
-        if not picks and not nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]:
+            logging.info(f"{team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts toward the underdog")
+        if not nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]:
             logging.info(f"No picks: week {week} is outside weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}")
-        logging.info(f"{len(picks)} underdog picks this week. The sheet's fair line is the spread plus the correction; "
+        logging.info(f"{len(picks)} picks this week. The sheet's fair line is the spread plus the correction; "
                      f"the stats-only projections above had no edge against the spread in testing")
         # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections filled in
         for earlier in range(1, week):
