@@ -1,4 +1,4 @@
-"""The underdog signal and the two pick rules the weekly sheet flags.
+"""The underdog signal and the pick rules the weekly sheet flags.
 
 Model: a ridge regression of the cover margin (result minus closing spread) on pre-game team ratings (31 play-by-play and
 6 box-score stat pairs, offense and defense) plus neutral site, rest and Elo, strongly regularized and trained on the 14
@@ -15,6 +15,18 @@ the cover margin) supports about 55%; 60% would need a signal roughly twice as i
 Teaser legs: the published Wong rule (6-point teasers through 3 and 7): underdogs of +1.5/+2.5 teased to +7.5/+8.5 and
 favorites of -7.5/-8.5 teased to -1.5/-2.5.  Legs won 74-76% in every era since 1999, weeks 5-16 (favorite legs only
 71% since 2018); a 2-team teaser needs 72.4% per leg at -110 and 73.9% at -120, and wins about 55-58% as one bet.
+
+Favorite picks (October 2026, nfl_research_favorites.py): night games (kickoff 7 pm Eastern or later: Thursday, Sunday
+and Monday nights) where the correction leans to the favorite by 0.5 points or more, weeks 5-16.  Found by a
+pre-registered selection process: each season, the best of 78 favorite rules on the seasons before it was bet in the
+next; that process hit 56.6% over 2011-2026, and it has chosen this rule every season since 2015 (2017 with the
+stricter selector).  The rule covered 65%
+(13-7) on 1999-2005, 59.6% on 2006-2017 and 56.0% on 2018-2026, about 11 a season, and 56.6% in the seasons after it was
+first chosen.  The correction is more informative in night games in every era (standalone national-TV games draw the
+most recreational money), which lifts these favorites past the usual favorite tax; in day games the favorites it
+favors cover about 50% at any size of lean.  A favorite pick needs a lean to the favorite, so it never coincides with an
+underdog pick.  The evidence is weaker than for the underdog picks (p about 0.09 against break-even on the seasons
+after selection); expect about 55%.
 """
 
 import logging
@@ -34,6 +46,9 @@ BACKWARD_TEST = (1999, 2005)
 TEASER_POINTS = 6.0
 TEASER_DOG_LINES = (1.5, 2.5)   # underdog legs, teased up through 3 and 7
 TEASER_FAV_LINES = (7.5, 8.5)   # favorite legs, teased down through 7 and 3
+FAVORITE_MIN_LEAN = 0.5         # favorite picks: the correction leans to the favorite by at least this many points...
+NIGHT_KICKOFF_HOUR = 19         # ...in a night game (kickoff 7 pm Eastern or later)
+FAVORITE_ERAS = ((1999, 2005), (2006, 2017), (2018, None))
 
 
 HIT_RATE_BIN_STARTS = (-99.0, 0.0, 0.25, 0.5, 1.0)   # correction toward the underdog, in points; negative = toward the favorite
@@ -115,6 +130,46 @@ def backtest_hit_rates(table, season):
         end = HIT_RATE_BIN_STARTS[i + 1] if i + 1 < len(HIT_RATE_BIN_STARTS) else np.inf
         in_bin = (toward_underdog >= start) & (toward_underdog < end)
         rows.append((start, float(win[in_bin].mean()) if in_bin.any() else None, int(in_bin.sum())))
+    return rows
+
+
+def is_night_game(gametime, weekday=None):
+    """Whether a game kicks off at night; nflverse `gametime` is 'HH:MM' Eastern.
+
+    A Monday game with no recorded kickoff (the 1999 schedule has none) is the Monday night game.
+    """
+    try:
+        return int(str(gametime).split(':')[0]) >= NIGHT_KICKOFF_HOUR
+    except ValueError:
+        return weekday == 'Monday'
+
+
+def is_favorite_pick(toward_underdog, week, night_game, min_lean=FAVORITE_MIN_LEAN):
+    """Whether a game is a favorite pick: weeks 5-16, a night game, and the correction leans to the favorite by at least
+    `min_lean` points (toward_underdog <= -min_lean).  Never true when is_pick is, which needs a lean to the underdog."""
+    return (PICK_WEEKS[0] <= week <= PICK_WEEKS[1] and bool(night_game) and toward_underdog is not None
+            and toward_underdog < 0 and -toward_underdog >= min_lean)
+
+
+def favorite_backtest(table, season):
+    """How often the favorite picks covered, by era, weeks PICK_WEEKS, each game scored by a model that never saw it.
+
+    Returns [(label, cover rate, games)] for 1999-2005, 2006-2017, 2018 to date and 1999 to date (pushes excluded).
+    """
+    frame = scored_history(table, season)
+    frame = frame[(frame['resid'] != 0) & (frame['spread_line'] != 0) & frame['week'].between(*PICK_WEEKS) & (frame['game_type'] == 'REG')]
+    pred, spread = frame['pred'].to_numpy(), frame['spread_line'].to_numpy()
+    toward_underdog = np.where(spread > 0, -pred, pred)   # spread_line > 0: the home team is favored
+    night = [is_night_game(g, d) for g, d in zip(frame['gametime'], frame['weekday'])]
+    picked = np.array([is_favorite_pick(t, w, n) for t, w, n in zip(toward_underdog, frame['week'], night)], dtype=bool)
+    covered = np.where(spread > 0, frame['resid'].to_numpy() > 0, frame['resid'].to_numpy() < 0)
+    seasons = frame['season'].to_numpy()
+    last = int(seasons.max())
+    rows = []
+    for first, end in FAVORITE_ERAS + ((FAVORITE_ERAS[0][0], None),):
+        end = end or last
+        mask = picked & (seasons >= first) & (seasons <= end)
+        rows.append((f'{first}-{end}', float(covered[mask].mean()) if mask.any() else None, int(mask.sum())))
     return rows
 
 

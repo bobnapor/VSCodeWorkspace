@@ -51,6 +51,11 @@ def week_label(game_type, week):
     return sheet.PLAYOFF_WEEK_NAMES.get(game_type, str(int(week)))
 
 
+def kickoff_text(gametime):
+    """The kickoff as 'HH:MM' Eastern (nflverse's gametime), or None when the schedule has none."""
+    return gametime if isinstance(gametime, str) and gametime else None
+
+
 def find_next_week_to_predict(table, season):
     """Earliest regular-season week of `season` that still has unplayed games, else the last week played."""
     regular = table[(table['season'] == season) & (table['game_type'] == 'REG')]
@@ -124,24 +129,29 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         actual = 0 if np.isnan(game['result']) else int(game['result'])
         mean = round(game['mean'], 1)
         logging.info(f"{index}|{label}|{season}|{home}|{away}|{mean}|{sheet.fair_line_as_home(mean)}|{round(game['std'], 2)}|{actual}")
-        final_rows.append({'week': label, 'year': season, 'home_team': home, 'away_team': away, 'projected': mean, 'actual': actual})
+        final_rows.append({'week': label, 'year': season, 'home_team': home, 'away_team': away, 'projected': mean, 'actual': actual,
+                           'kickoff': kickoff_text(game['gametime'])})
     logging.info("Projections complete!")
+    kickoffs = {(row['home_team'], row['away_team']): (row['kickoff'], game['weekday']) for row, (_, game) in zip(final_rows, games.iterrows())}
 
-    hit_rates, teaser_rates = None, None
-    # The underdog signal and the two pick rules (straight underdog picks and Wong teaser legs); see nfl_signal.py
+    hit_rates, teaser_rates, favorite_rates = None, None, None
+    # The underdog signal and the pick rules (straight underdog picks, favorite picks and Wong teaser legs); see nfl_signal.py
     try:
         import nfl_signal
         with run.step(3, "Building play-by-play team ratings for the pick model"):
             lab_table = lab.build_table(lab.ALL_PAIRS, refresh=True)
-        with run.step(4, "Backtesting the pick model and teaser legs on every season since 1999"):
+        with run.step(4, "Backtesting the pick model, favorite picks and teaser legs on every season since 1999"):
             hit_rates = nfl_signal.backtest_hit_rates(lab_table, season)
             logging.info("Backtest cover rate of the model's side by correction toward the underdog, weeks 5-16, 1999 to date "
                          "(-99 = the correction favors the favorite): "
                          + ", ".join(f"{start:g}+: {rate:.1%} ({games})" for start, rate, games in hit_rates if rate is not None))
+            favorite_rates = nfl_signal.favorite_backtest(lab_table, season)
+            logging.info(f"Favorite picks (night games, lean to the favorite {nfl_signal.FAVORITE_MIN_LEAN:g}+ pts), weeks 5-16: "
+                         + "; ".join(f"{label}: {rate:.1%} of {n}" for label, rate, n in favorite_rates if rate is not None))
             teaser_rates = nfl_signal.teaser_leg_rates(lab_table)
             logging.info("Wong teaser legs, weeks 5-16: " + "; ".join(
                 f"{label}: {rate:.1%} of {n} since 1999, {recent:.1%} of {m} since 2018" for label, rate, n, recent, m in teaser_rates))
-        with run.step(5, "Finding this week's picks and teaser legs (model corrections, reasons and DraftKings spreads)"):
+        with run.step(5, "Finding this week's picks, favorite picks and teaser legs (model corrections, reasons and DraftKings spreads)"):
             corrections = nfl_signal.week_corrections(season, week, lab_table)
             try:
                 import nfl_reasons
@@ -178,6 +188,23 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                 logging.info(f"No picks: week {week} is outside weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}")
             logging.info(f"{len(picks)} picks this week. The sheet's fair line is the spread plus the correction; "
                          f"the stats-only projections above had no edge against the spread in testing")
+            # favorite picks: a separate rule that needs a lean to the favorite, so it never touches an underdog pick
+            logging.info(f"\n=== FAVORITE PICKS: night games where the correction leans to the favorite by "
+                         f"{nfl_signal.FAVORITE_MIN_LEAN:g}+ pts, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]} "
+                         f"(56% or better in every era tested, about 1 a week; weaker evidence than the underdog picks, expect about 55%) ===")
+            favorite_picks = [key for key, (_dog, _points, toward_dog) in details.items()
+                              if nfl_signal.is_favorite_pick(toward_dog, week, nfl_signal.is_night_game(*kickoffs.get(key, (None, None))))]
+            favorite_picks.sort(key=lambda key: details[key][2])
+            for key in favorite_picks:
+                dog, points, toward_dog = details[key]
+                favorite = key[1] if dog == key[0] else key[0]
+                kickoff, weekday = kickoffs[key]
+                logging.info(f"{favorite} -{points:g} ({key[1]} at {key[0]}, {weekday} {kickoff} ET), "
+                             f"correction {-toward_dog:.1f} pts toward the favorite")
+                found = reasons.get((week, key[0], key[1]))
+                if found:
+                    logging.info("    Why: " + found[1].replace('\n', '\n         '))
+            logging.info(f"{len(favorite_picks)} favorite picks this week")
             logging.info("\n=== TEASER LEGS: 6-point Wong teasers through 3 and 7 (pair two legs in one teaser) ===")
             legs = 0
             for row in final_rows:
@@ -191,12 +218,15 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             logging.info(f"{legs} teaser legs this week")
         # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections and reasons filled in
         with run.step(6, f"Filling in model corrections and reasons for weeks 1-{week - 1}"):
+            regular = lab_table[(lab_table['season'] == season) & (lab_table['game_type'] == 'REG')]
+            kickoff_of = {(int(g.week), TEAM_FULL_NAMES.get(g.home_team, g.home_team), TEAM_FULL_NAMES.get(g.away_team, g.away_team)): kickoff_text(g.gametime)
+                          for g in regular.itertuples()}
             for earlier in range(1, week):
                 for (home, away), correction in nfl_signal.week_corrections(season, earlier, lab_table).items():
                     found = reasons.get((earlier, home, away))
                     final_rows.append({'week': str(earlier), 'year': season, 'home_team': home, 'away_team': away,
                                        'projected': 0.0, 'actual': None, 'correction': correction, 'backfill': True,
-                                       'reason': found[1] if found else None})
+                                       'reason': found[1] if found else None, 'kickoff': kickoff_of.get((earlier, home, away))})
     except Exception as e:
         logging.warning(f"Could not compute the underdog signal: {e}")
 
@@ -223,7 +253,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             output_path, rows_added, actuals_updated, spreads_filled = sheet.write_projections_spreadsheet(
                 final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
                 qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates, teaser_table=teaser_rates,
-                closing_lookup=closing_lookup, current_week=final_rows[0]['week'],
+                favorite_table=favorite_rates, closing_lookup=closing_lookup, current_week=final_rows[0]['week'],
             )
             logging.info(
                 f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "
