@@ -164,6 +164,8 @@ Research (each runnable, prints its evidence): **`nfl_research_validate.py`** (t
 
 Legacy (Pro-Football-Reference scrapers, broken since the Cloudflare block): `nflpicks.py`, `nflpicks_backtest.py`, `nflpicks_v2_0.py`, `nflpicks_v2_0_multithreaded.py`.
 
+Player props (section 11): **`nfl_prod_props.py`** (weekly runner; `SIDES` picks overs and/or unders), `nfl_prop_lines.py` (DraftKings/ESPN BET prop lines from ESPN: current week, cached history, opening game lines, snapshot log), `nfl_prop_model.py` (features, per-market forecasts and the early-week variant, outcome distributions, reasons), `nfl_prop_signal.py` (the under and over rules, Bet At prices, grading, backtest scoring), `nfl_props_sheet.py` (the props workbook), **`nfl_research_props.py`** (forecast quality, discovery, the untouched tests, the over research).
+
 Key framework functions in `nfl_lab.py`: `default_table()` (cached full table, 1999 on), `build_table(pairs, refresh)`, `walk_forward(table, fit_predict, first_test=2006, last_test=2026, window=14)`, `ridge_margin(columns, alpha, target)` (drops near-constant columns, returns zeros if none remain), `information_test`, `scorecard`; constants `DISCOVERY_END = 2017`, `PBP_FEATURES`, `BOX_FEATURES`, `BASIC_CONTEXT`.
 
 ## 9. Environment and gotchas
@@ -175,5 +177,120 @@ Key framework functions in `nfl_lab.py`: `default_table()` (cached full table, 1
 ## 10. Suggested next steps
 
 1. **Measure live performance properly**: done in the sheet (closing spread, line value versus the close, and the season scoreboard); track the picks from 2026 week 5 on. Closing-line value tells within a season or two what win rate needs many seasons to show.
-2. **New information has to come from outside the public box score.** Free public data has now been tested broadly (section 6) and is priced. What remains: information the market does not have yet (reacting to injury/inactive news before lines move; `line_log.csv` will show how fast lines react), markets that are less efficient than NFL sides (player props, team totals, first halves, live betting, college football), short-history data that can only be judged by forward testing, and paid data (charting and grades). Judge any new signal by its correlation with the cover margin in every era, with about 0.11+ as the bar for a 60% rule.
+2. **New information has to come from outside the public box score.** Free public data has now been tested broadly (section 6) and is priced. What remains: information the market does not have yet (reacting to injury/inactive news before lines move; `line_log.csv` will show how fast lines react), markets that are less efficient than NFL sides (player props, now built: section 11; team totals, first halves, live betting, college football), short-history data that can only be judged by forward testing, and paid data (charting and grades). Judge any new signal by its correlation with the cover margin in every era, with about 0.11+ as the bar for a 60% rule.
 3. **Teasers**: if the book prices 2-team 6-point teasers at -120 or better, pairing underdog legs is the best-supported bet in the project; whether the model can filter legs is untested and would need a pre-registered test.
+
+## 11. Player props (`nfl_prod_props.py`, October 2026)
+
+A separate weekly flow that finds DraftKings player prop bets. It leaves the spread runner, its models and its workbook untouched (the only shared-code change is two additive loaders in `nflverse_data.py`: `load_players()` and a `columns` filter on `load_player_weeks()`).
+
+### 11.1 What runs
+
+`python nfl_prod_props.py` (from `nfl/`; about a minute, or 5-6 minutes the first time while it builds the forecast caches and downloads the prop-line history). `PREDICT_YEAR` / `PREDICT_WEEK` in the `__main__` block override the season and week, as in the spread runner. **`SIDES`** picks the rules: `('Over',)` by default (the owner prefers overs), `('Over', 'Under')` adds the under picks. Two rules, each with its own model variant (section 11.4 for the unders, 11.7 for the overs):
+- **Overs: run it as soon as DraftKings posts the week's props (usually Tuesday or Wednesday) and bet right away.** An over is a pick only while its line is still at the opening number, because the edge is the market moving toward these overs during the week. An over still at its opener within 48 hours of kickoff is marked LATE and priced as the weaker bet it is.
+- **Unders** hold against closing lines, so they suit bets placed close to kickoff.
+
+Seven logged steps:
+1. Load nflverse player stats (2006 on, offense only), the schedule, injury reports and the players table (ESPN ids); pick the next unplayed week (`find_next_week_to_predict`, reused from the spread runner).
+2. Fetch the week's DraftKings prop lines from ESPN for every game **not yet kicked off** (after kickoff the feed carries in-game lines).
+3. Build pre-game features and fit one model per market on the 10 seasons before this one: the early-week variant for the overs (no injury report, opening spreads and totals from ESPN), the full model for the unders (the week's injury report, closing game lines). Players are placed on their team by nflverse's current roster (the team of a player's last game is stale after a move). A quarterback DraftKings posts passing props for is used as his team's starter when nflverse lists someone else who has none (nflverse's expected starter can lag injury news).
+4. Score every past prop line since 2024 (the backtest record behind Hist. Win %: overs at opening lines, unders at closing lines) and build the outcome distributions.
+5. Forecast this week's players, apply the rules, log the picks best first with a one-line reason.
+6. Grade earlier picks from nflverse results and append the week's lines to `data_cache/prop_line_log.csv`.
+7. Write `<Desktop>\<year>_nfl_props.xlsx`; the log goes to `C:\Users\Bobby\nfl_props_<timestamp>.txt`.
+
+**How to use the output:** each pick has a **Bet At** price, the worst DraftKings price at which the pick still returns 3% at its market's backtest win rate. The free feed has DraftKings' lines but **not its prices**, so check the price in the app and skip any pick priced worse than Bet At. Neither rule's win rate keeps rising reliably above its 0.65 threshold, so the order of a list is not a ranking of quality. If you cannot bet them all (about 30 overs a week early in the week; 70-80 unders), prefer the ones whose price beats Bet At by the most.
+
+### 11.2 Data (`nfl_prop_lines.py`)
+
+| Source | Content |
+|---|---|
+| ESPN core API `.../events/{id}/competitions/{id}/odds/{provider}/propBets` | The book's player props per game: the current line and the opening line, **no prices**. Provider 100 = DraftKings (late 2025 on), 58 = ESPN BET (2024-2025). Finished games stay in the feed. `games.csv` carries ESPN's event id (`espn`) for every game; nflverse `players.csv` maps ESPN athlete ids to gsis ids (99.8% of lines). |
+| Markets used | Passing yards, completions, attempts, TDs, interceptions; rush attempts, rushing yards; receptions, receiving yards; pass + rush yards; rush + rec yards (`MARKETS`). Longest-play, kicking, defensive and touchdown-scorer props are skipped (no nflverse result or no line). |
+
+Cached in `data_cache/props_espn_{season}.csv` (one fetch per finished game, about 40 seconds for two seasons): 19,909 main lines in 478 games of 2024-2025 (ESPN BET, plus DraftKings for 184 lines late in 2025) and 3,917 in 80 DraftKings games (2026 weeks 1-6). Two traps, both handled:
+- **ESPN BET lists alternate lines** (a ladder such as 149.5/174.5/224.5/299.5 passing yards, each listed once); the main line is the one listed twice (its over and under). Players whose top count is tied between two values are skipped.
+- **In-game lines.** DraftKings keeps moving a line after kickoff and the feed keeps the last value (a passing-yards line 258.5 -> 271.5 updated mid-game), so a stored DraftKings line counts as a closing line only if it was last updated before kickoff (`pregame`): 57-80% of receptions/attempts/TD lines, but only 5-27% of yardage lines. ESPN BET's stored lines are batch-stamped hours after each game, but where they moved they land only slightly nearer the result than the opener (receiving yards MAE 22.6 -> 21.8, passing yards 56.5 -> 54.9), as a pre-game close does and an in-game line would not, so they are treated as closing lines. Opening lines are always pre-game.
+
+### 11.3 The forecast (`nfl_prop_model.py`)
+
+One `HistGradientBoostingRegressor` (Poisson loss, 300 trees of 15 leaves, `min_samples_leaf` 100) per market, refitted each season on the 10 seasons before it, on the players books post such props for (the starting QB for passing markets; RBs, starting QBs and anyone averaging 2+ carries for rushing; RBs, WRs and TEs for receiving). Features, all known before kickoff:
+- the player's recent (half-life 1.5 games) and longer (6 games) recency-weighted averages and his season-to-date average of attempts, completions, yards, TDs, interceptions, sacks, carries, targets, catches and air yards, and of his share of the team's targets, carries and air yards; games played;
+- the team's implied points from the closing spread and total, against what it has been scoring; the spread; home field; a roof; the team's recent pass attempts and carries;
+- the opponent's recent yards, catches and targets allowed (to the player's position group for receiving), sacks, points, each relative to the previous season's league average;
+- the share of the team's targets and carries belonging to teammates ruled Out or Doubtful that week; whether the player is Questionable;
+- the starting QB's recent passing, how many games he has started, and whether he is new.
+
+**Chance over/under a line** (`OutcomeDistribution`): among the out-of-sample forecasts of the previous 6 seasons, take the games whose forecast was nearest (400 for quarterback markets, 1,200 rushing, 2,000 receiving), centred on this forecast; the chance is the share of their results above or below the line (for yardage markets each past result is scaled by the ratio of the forecasts). This doubles as calibration: a model that over-forecasts high-volume players is corrected by what those forecasts actually produced. Out-of-sample forecasts for every season from 2018 are cached in `data_cache/prop_forecasts_v{MODEL_VERSION}.csv` (bump `MODEL_VERSION` after changing features or settings).
+
+Forecast quality (out of sample, 2018-2025, `python nfl_research_props.py quality`): better than the player's recency average alone in mean absolute error in nearly every market and season (passing yards 57-64 vs 63-68; receptions correlation 0.65-0.68 vs 0.63-0.67; rush attempts 0.75-0.81). Interceptions are close to unpredictable (correlation 0.0-0.16). The bias in passing yards swings with the league's passing environment (-3.8 to +9.1 yards a season).
+
+### 11.4 The rule (`nfl_prop_signal.py`) and the evidence (`nfl_research_props.py`)
+
+Protocol as in section 4: the rule was chosen on the **discovery** lines (ESPN BET 2024-2025) and then scored once on the **untouched test** lines (DraftKings 2026 weeks 1-6). Win rates are at the line (no prices; pushes and voids left out).
+
+**Discovery findings.**
+- Against **opening lines** the model looks strong (information 0.100, t 14; win rate rising to 61% at a 0.70+ chance). But the features use information that arrives during the week (the final injury report, the closing spread and total, the actual starter), and lines that rose 30% or more during the week ended over the opener 67% of the time. Against openers the edge is overstated.
+- Against **closing lines**, the honest benchmark: information 0.044 (t 6.2), all of it on the **Under** side (unders 0.042, t 4.6; overs -0.005, about 50% at every threshold). The model's unders won 50.8% / 52.0% / 53.1% / 56.2% / 56.3% at chances 0.50 / 0.55 / 0.60 / 0.65 / 0.70+, against 51.6% for betting every under.
+
+**The rule:** bet the **Under** when the model's chance is **0.65 or more**, in passing yards, pass + rush yards, rush attempts, rushing yards, receptions, receiving yards and rush + rec yards. Left out: TD and interception props (books move the price, not the line, on 0.5/1.5 lines, so a win rate at the line says nothing without prices) and pass attempts and completions (negative information against closing lines).
+
+| Frozen rule | Closing lines | Opening lines |
+|---|---|---|
+| Discovery, ESPN BET 2024-2025 | **56.5%** (n=2,873; about 80 a week) | 58.7% (n=3,124) |
+| **Test, DraftKings 2026 weeks 1-6 (untouched)** | **57.4%** (n=284; +27.2 units at -110) | 54.3% (n=727; +27.1 units) |
+
+By market (discovery closing / test closing / test opening): receptions 59.5% / 58.6% / 56.8%; rushing yards 57.3% / 55.2% / 53.3%; rush + rec yards 55.9% / 80% (n=5) / 57.8%; rush attempts 55.2% / 59.1% / 58.7%; receiving yards 53.8% / 40.9% (n=22) / 48.3% (n=172); passing yards 58.8% (n=34) and pass + rush yards 37.0% (n=27) are too small to read. Information against DraftKings closing lines, all markets: 0.085 (t 3.3).
+
+One correction after the first test run: the neighbour window slid inward at the ends of the forecast range (the highest forecasts borrowed only lower ones, which overstated their unders). It now stays centred. Before the fix the same rule scored 56.5% of 2,928 (discovery closing), 56.3% of 293 (test closing) and 54.1% of 736 (test opening). The conclusions are unchanged.
+
+**Hist. Win % and Bet At.** Hist. Win % is the rule's record in the pick's market on closing lines since 2024 (discovery plus every finished week since), shrunk toward the all-market rate by 200 picks' weight (`market_win_rates`), so a market with few picks does not set a price on its own. Bet At is the worst price at which that rate still returns 3% (`MIN_EDGE`). As of week 6 of 2026: -133 for receptions (58.9%), -124 for rushing yards, -121 for rush + rec yards, -119 for rush attempts and -111 for receiving yards (54.1%). Since DraftKings often prices unders at -115 to -130, many receiving-yards picks will not clear their Bet At; that is intended.
+
+**Diagnostics, not used in the rule:** unders on players whose teammates are out (20%+ of the team's targets or carries vacated), where the line may already price a bigger role, won 57.5% of 480 (discovery) and 22 of 29 (test), so they are not a weak spot. Weeks 1-3 are mixed (58.1% in discovery, 50.6% of 168 in the test).
+
+### 11.5 The workbook (`nfl_props_sheet.py`)
+
+`<Desktop>\<year>_nfl_props.xlsx`, rebuilt every run after the Prop Log is read back by header text, saved through a temporary file like the spread workbook:
+- **This Week**: the season scoreboard (W-L-P, win %, units at your price or -110, overs W-L, unders W-L, average line versus the close, last week's W-L; all formulas over the Prop Log), then this run's picks best first, in an Over section (bet now, at the opening line) and, when enabled, an Under section (kickoff, game, player, prop, pick, where the line opened, forecast, model chance, Hist. Win %, Bet At, why), the games not evaluated (already kicked off) and a legend.
+- **Prop Log**: every pick of the season, logged the first time it qualifies and never rewritten (a re-run adds new picks only, so the log keeps the line available when the pick was made). Type the price you got in **Your Price** and anything else in **Notes** (yellow; both kept across runs). **Units** is a formula on Your Price (blank = -110). Result, W/L (W, L, P or **Void** when a finished game has no nflverse stats for the player: DraftKings voids props for players who do not play) and the **Closing Line** / **Line vs Close** (positive = your line beat the close) fill in once the game is over. Keys and raw numbers are grouped at the right.
+- **Model Info**: the rules in words, the live record by market behind each rule's Hist. Win %, and the frozen evidence.
+
+### 11.6 Weak points
+
+1. **No prices.** Every win rate is at the line. Unders are often juiced (-115 to -130), and break-even is 52.4% at -110, 54.5% at -120 and 56.5% at -130. Bet At is the guard, but it relies on the backtest rate per market.
+2. **Two books.** Discovery is ESPN BET (a softer book) and the test is DraftKings. ESPN BET's stored lines are taken as pre-game closes on the evidence above. DraftKings' clean closes are a selected subset (lines not updated in-game, mostly receptions and attempts), and the DraftKings openers are early-week numbers the model's late-week features have an advantage over.
+3. **Small test.** 284 closing-line picks give a 95% interval of about +/-5.8 points. The next clean evidence is forward: grade the Prop Log and watch Line vs Close (the closing line comes from ESPN when DraftKings did not move it in-game, otherwise from this project's last snapshot before kickoff, so run the props runner close to kickoff to capture it).
+4. **Correlated picks.** Many unders come from the same game (a slow game sinks or lifts them together), so weekly results swing more than independent bets would.
+5. **Voids versus zeros.** nflverse has no row for a player who played but touched nothing, so such a game is marked Void although DraftKings would grade the under a win.
+6. **Models refit once a season.** The passing environment drifts within a season (forecast bias +9 passing yards in 2025); the outcome distributions absorb a steady bias but not a new one.
+7. **Receiving yards** was the weakest market in the test. It was kept because the rule was frozen first; its low Hist. Win % already tightens its Bet At.
+
+### 11.7 Overs: the early-week bet (`OVER_*` in `nfl_prop_signal.py`; `python nfl_research_props.py overs` / `overs_test`)
+
+The owner prefers overs, and against closing lines the model's overs carry no information (section 11.4). But against **opening** lines they did (information 0.066, t 5.7, in discovery), which means the market moves toward them during the week. The question was whether that is real edge or look-ahead, since the full model's features include the final injury report and the closing game lines, which nobody has when props open.
+
+**The early-week variant** answers it. It uses only what is known when props open: no injury-report features (blanked in training and forecasting alike) and the **opening** spread and total, which ESPN keeps for every game (`nfl_prop_lines.load_game_openers`, cached in `data_cache/game_openers.csv`; `nfl_prop_model.with_openers`). Seasons before 2024 have no openers and keep the closing numbers; only the models' training uses them. Its own forecast cache is `prop_forecasts_early_v{MODEL_VERSION}.csv`. Pre-registered bar, on the discovery lines (ESPN BET 2024-2025): win 55%+ at the opening line **and** closing-line value with t >= 2 (the line moving toward the over after the bet).
+
+**Discovery findings (ESPN BET 2024-2025 opening lines):**
+- The early variant's overs did as well as the full model's (0.65+: 59.5% of 1,245 vs 55.4% of 648), so the edge is not late news.
+- Win rate by chance, line-moving markets: 53.5% (0.55+), 55.8% (0.60+), 58.9% (0.65+, n=1,174), 60.5% (0.70+), 68.1% (0.75+).
+- **No market drift:** across all lines, 29% rose and 26% fell from open to close. Where the variant leans over at 0.65+, the line rose for 53% and fell for 11%; where it leans under, it fell for 46% and rose for 14%. It predicts the week's line moves in every market.
+- **The edge lives in the lines that move:** overs whose line later rose won 67.0% at the opener (54% of the picks). Those that never moved won 52.1% (35%), and those that fell won 40.9% (11%). At the closing line the same overs won about 51-52%.
+- For bettors at the close there is nothing for overs: the full model's overs won about 51% whether the line rose or never moved, and 49.8% when it fell.
+
+**The over rule (frozen before the test):** bet the **Over** at DraftKings' opening line when the early-week variant's chance is **0.65 or more** (0.65 matches the under rule; the grid's best-looking 0.75 was not chosen), in every market but passing TDs and interceptions (books move their price, not the line). It applies only **while the line is still at the opening number**.
+
+| Frozen over rule, at opening lines | Win % | Picks |
+|---|---|---|
+| Discovery, ESPN BET 2024-2025 | **58.9%** | 1,174 (about 33 a week; +145 units at -110) |
+| **Test, DraftKings 2026 weeks 1-6 (untouched)** | **55.7%** | 183 (about 30 a week; +11.7 units at -110) |
+
+Test by market: receptions 63.5% (63), receiving yards 55.9% (34), passing yards 54.2% (24); the rest have 15 picks or fewer. Where DraftKings' close is known (73 of the picks), the line rose for 26% and fell for 11% (average move t = 2.4), and at the close those bets won 49.3%. Information of the variant's over leans at DraftKings openers: 0.057 (t 2.1), as in discovery (0.054).
+
+**Late overs.** A line still at its opener close to kickoff is mostly one the market never moves, and those won only 53.2% (457 picks with a known close, discovery and test). An over found within `OVER_LATE_HOURS` (48) of kickoff is therefore marked LATE and priced at that rate, so its Bet At asks for about even money (-107). The 48 hours is a judgment call: the public history has only opening and closing lines, so when lines move during the week is unknown. `prop_line_log.csv` (a snapshot every run) will show it.
+
+**Over-specific weak points:**
+1. It only pays if you bet early, before the line moves. Opening prop limits are low (fine at recreational stakes), and the opener may be gone within hours of posting.
+2. The test is small: 183 picks, about +/-7 points at 95%. Expect roughly 55-58% at the opener.
+3. ESPN BET's openers (discovery) may have been softer than DraftKings' (test), as the drop from 58.9% to 55.7% suggests.
+4. Low lines such as Over 0.5 or 1.5 receptions are often heavily juiced. Bet At is the guard (e.g. receptions overs at about -156 early in the week).
