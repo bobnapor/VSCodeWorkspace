@@ -43,6 +43,7 @@ LOG_LAYOUT = (
     ('fair_line', 'Fair Line (Home)'), ('fair_vs_spread', 'Fair Line vs Spread'), ('side', 'Model Side'),
     ('covering', 'Covering Team'), ('side_result', 'Model Side Result'), ('close', 'Closing Spread (Home)'),
     ('correction', 'Model Correction (Home)'), ('kickoff', 'Kickoff (ET)'), ('fav_clv', 'Fav Line vs Close'), ('year', 'Year'),
+    ('line_written', 'Line Written (Home)'),
 )
 
 
@@ -62,7 +63,7 @@ LAST_COLUMN = len(LOG_LAYOUT)
 LOG_WIDTHS = {'week': 6, 'away': 20, 'home': 20, 'spread': 8, 'pick': 15, 'fav_pick': 15, 'teaser': 15, 'dog_correction': 9,
               'hit_rate': 8, 'actual': 9, 'result': 8, 'fav_result': 8, 'teaser_result': 8, 'clv': 8, 'qb_flag': 30, 'notes': 24,
               'reason': 90, 'fair_line': 9, 'fair_vs_spread': 9, 'side': 12, 'covering': 12, 'side_result': 9, 'close': 9,
-              'correction': 10, 'kickoff': 9, 'fav_clv': 9, 'year': 6}
+              'correction': 10, 'kickoff': 9, 'fav_clv': 9, 'year': 6, 'line_written': 9}
 # The reason shows its headline (first line) only, so every game stays one row high; the full text is in the cell
 ONE_LINE_FIELDS = ('reason',)
 LOG_ROW_HEIGHT = 17
@@ -218,24 +219,76 @@ def fetch_draftkings_spreads(year, week, max_retries=3):
 
 
 _qb_flag_data = {}
+ESPN_INJURIES_URL = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries'
+
+
+def fetch_espn_injuries():
+    """ESPN's live injury list, {(team, name key): (status, injury, short comment, time)}, or {} if unavailable.  It
+    carries practice news and injured reserve before nflverse's copy of the official reports catches up."""
+    from nfl_injury_features import TEAM_RENAMES, name_key
+    try:
+        response = requests.get(ESPN_INJURIES_URL, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
+        response.raise_for_status()
+        teams = response.json().get('injuries', [])
+    except (requests.RequestException, ValueError) as e:
+        logging.warning(f"Could not load ESPN's injury list ({e}); QB notes use the nflverse reports only")
+        return {}
+    live = {}
+    for team in teams:
+        for item in team.get('injuries', []):
+            athlete = item.get('athlete') or {}
+            code = (athlete.get('team') or {}).get('abbreviation')
+            live[(TEAM_RENAMES.get(code, code), name_key(athlete.get('displayName')))] = (
+                item.get('status'), (item.get('details') or {}).get('type'), item.get('shortComment'), item.get('date'))
+    return live
 
 
 def fetch_qb_injury_flags(year, week):
-    """Quarterback injury notes for one week's games from nflverse injury reports, or {} if unavailable.
+    """Quarterback notes for one week's games from nflverse's injury reports and weekly rosters and ESPN's live injury
+    list, or {} if unavailable.
 
-    Downloads fresh schedule and injury files once per run, since the reports update through the week.
-    See nfl_injury_features.qb_injury_flags for exactly what gets flagged.
+    Downloads fresh schedule, injury and roster files once per run, since the reports update through the week (the
+    rosters carry injured reserve, which drops a player off the reports; ESPN carries practice news before the reports
+    reach nflverse).  See nfl_injury_features.qb_injury_flags for exactly what gets noted.
     """
     global _qb_flag_data
     try:
         if _qb_flag_data.get('year') != year:
-            from nflverse_data import load_games, load_injuries
-            _qb_flag_data = {'year': year, 'games': load_games(refresh=True), 'injuries': load_injuries(year, year, refresh=True)}
+            from nflverse_data import load_games, load_injuries, load_weekly_rosters
+            try:
+                rosters = load_weekly_rosters(year, year, refresh=True)
+            except Exception as e:
+                logging.warning(f"Could not load the {year} weekly rosters ({e}); QB notes will not show injured reserve")
+                rosters = None
+            _qb_flag_data = {'year': year, 'games': load_games(refresh=True), 'injuries': load_injuries(year, year, refresh=True),
+                             'rosters': rosters, 'live': fetch_espn_injuries()}
         from nfl_injury_features import qb_injury_flags
-        return qb_injury_flags(_qb_flag_data['games'], _qb_flag_data['injuries'], year, week)
+        flags = qb_injury_flags(_qb_flag_data['games'], _qb_flag_data['injuries'], year, week, _qb_flag_data['rosters'],
+                                _qb_flag_data['live'])
+        for (home, away), note in flags.items():
+            logging.info(f"QB note, week {week}, {away} at {home}: {note}")
+        return flags
     except Exception as e:
         logging.warning(f"Could not load quarterback injury data for {year} week {week}: {e}")
         return {}
+
+
+def _logged_dk_lines(year):
+    """{(week, home, away): DraftKings home spreads the runs logged in line_log.csv} for `year`, full team names.  Lets a
+    workbook from before the Line Written column tell a spread this code wrote from one typed in."""
+    from nfl_injury_features import TEAM_FULL_NAMES
+    from nflverse_data import CACHE_DIR
+    path = os.path.join(CACHE_DIR, 'line_log.csv')
+    try:
+        log = pd.read_csv(path)
+    except (OSError, ValueError):
+        return {}
+    log = log[(log['season'] == int(year)) & log['dk_home_spread'].notna()]
+    lines = {}
+    for row in log.itertuples():
+        key = (int(row.week), TEAM_FULL_NAMES.get(row.home_team, row.home_team), TEAM_FULL_NAMES.get(row.away_team, row.away_team))
+        lines.setdefault(key, set()).add(float(row.dk_home_spread))
+    return lines
 
 
 # ---------------------------------------------------------------- reading an existing workbook
@@ -486,11 +539,12 @@ def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favo
         '     worse there and it still helps them, because the line has historically overrated that gap. "Steady" effects have',
         '     pointed the same way across the training seasons; effects that flipped are weaker evidence.',
         'Teaser Leg: a published 6-point teaser leg (about 75% of legs won); pair two of them in one teaser.',
-        'Season Log: yellow columns are typed by hand (spreads fill in automatically; the next run never overwrites them).',
+        'Season Log: yellow columns are typed by hand.  Home Spread fills in from DraftKings and follows the line until',
+        '     kickoff; a spread you type yourself (the line you bet) is kept, and so are final margins and notes.',
         '     Why the Model Leans shows the headline; select the cell to read the whole reason in the formula bar.',
         '     Line vs Close: points your pick got versus the closing line (positive = you beat the close).',
         '     Detail columns (fair line, model side, closing spread, model correction, kickoff, the favorite picks\' line versus',
-        '     the close) are grouped at the right: click + to show.',
+        '     the close, and the line this code last wrote) are grouped at the right: click + to show.',
         'Settings above: change a minimum lean or the pick weeks; the formulas pick up the change at once.',
     )
     for i, line in enumerate(guide, start=guide_row + 1):
@@ -522,10 +576,10 @@ def _write_log(ws, records, settings):
 
     centered = {'week', 'spread', 'pick', 'fav_pick', 'teaser', 'dog_correction', 'hit_rate', 'actual', 'result', 'fav_result',
                 'teaser_result', 'clv', 'fair_line', 'fair_vs_spread', 'side', 'covering', 'side_result', 'close', 'correction',
-                'kickoff', 'fav_clv', 'year'}
+                'kickoff', 'fav_clv', 'year', 'line_written'}
     formats = {'spread': SIGNED_GENERAL, 'close': SIGNED_GENERAL, 'actual': SIGNED_GENERAL, 'fair_line': '+0.0;-0.0;0.0',
                'fair_vs_spread': '+0.0;-0.0;0.0', 'dog_correction': '+0.0;-0.0;0.0', 'hit_rate': '0%', 'clv': '+0.0;-0.0;0.0',
-               'correction': '+0.00;-0.00;0.00', 'fav_clv': '+0.0;-0.0;0.0'}
+               'correction': '+0.00;-0.00;0.00', 'fav_clv': '+0.0;-0.0;0.0', 'line_written': SIGNED_GENERAL}
     outline = Side(style='medium', color=NAVY)
     row_of = {}
 
@@ -546,6 +600,7 @@ def _write_log(ws, records, settings):
             'week': record['week'], 'away': record['away'], 'home': record['home'], 'spread': record['spread'],
             'actual': record['actual'], 'reason': record.get('reason'), 'qb_flag': record.get('qb_flag'), 'notes': record['notes'],
             'fair_line': record['fair_line'], 'close': record.get('close'), 'correction': record['correction'], 'year': record['year'],
+            'line_written': record.get('line_written'),
             # the correction measured toward the underdog (positive = the model likes the underdog more than the spread does)
             'dog_correction': f'=IF(OR({spread}="",{c["correction"]}="",{spread}=0),"",ROUND(IF({spread}>0,{c["correction"]},-{c["correction"]}),3))',
             'pick': f'=IF({dog}="","",IF(AND({in_weeks},{dog}>0,{dog}>={setting["threshold"]}),'
@@ -866,9 +921,10 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     The workbook is the season's running log: each run adds its week's games in week order (a week run after later
     weeks is inserted after the weeks before it), keeps every spread, note and recorded correction or reason, refreshes
-    final margins (`actual_lookup`, {(week, year, home, away): difference}) and closing spreads (`closing_lookup`) for
+    final margins (`actual_lookup`, {(week, year, home, away): difference}, played games only, so 0 is a tie) and closing spreads (`closing_lookup`) for
     games that have been played, fills blank spreads from `spread_fetcher(year, week)` (DraftKings via Action Network
-    in production; a spread already there is never replaced) and refreshes QB notes for unplayed games from
+    in production) and moves a spread this code wrote (remembered in Line Written) with the line until the game is played,
+    while a spread typed into the sheet is never replaced, and refreshes QB notes for unplayed games from
     `qb_flag_fetcher(year, week)`.  The fair line is the spread moved by the model correction, so the model side always
     agrees with the pick.  `rows` may carry a 'reason' (the plain-words explanation), kept once recorded like the
     correction, and a 'kickoff' ('HH:MM' Eastern, which decides favorite picks), refreshed whenever a row brings one
@@ -907,13 +963,13 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
         return (str(week_value(week)), str(game_year), home, away)
 
     def played_actual(actual):
-        # Unplayed games carry a placeholder difference of 0
+        # Unplayed games carry a placeholder difference of 0 in `rows`
         return None if actual in (0, None) or pd.isna(actual) else int(actual)
 
     actuals = {}
     for key, actual in (actual_lookup or {}).items():
-        if played_actual(actual) is not None:
-            actuals[game_key(*key)] = played_actual(actual)
+        if actual is not None and not pd.isna(actual):  # only played games are looked up, so a 0 here is a tie
+            actuals[game_key(*key)] = int(actual)
     for row in rows:
         if played_actual(row['actual']) is not None:
             actuals[game_key(row['week'], row['year'], row['home_team'], row['away_team'])] = played_actual(row['actual'])
@@ -928,7 +984,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             if not value('home'):
                 continue
             record = {field: value(field) for field in ('week', 'year', 'home', 'away', 'fair_line', 'spread', 'actual', 'notes',
-                                                         'qb_flag', 'correction', 'close', 'reason', 'kickoff')}
+                                                         'qb_flag', 'correction', 'close', 'reason', 'kickoff', 'line_written')}
             record['week'] = week_value(record['week'])
             record['kickoff'] = _kickoff_text(record['kickoff'])
             key = game_key(record['week'], record['year'], record['home'], record['away'])
@@ -957,7 +1013,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'week': week_value(row['week']), 'year': int(row['year']), 'home': row['home_team'], 'away': row['away_team'],
             'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None, 'actual': actuals.get(key), 'notes': None,
             'qb_flag': None, 'correction': row.get('correction'), 'close': None, 'reason': row.get('reason'),
-            'kickoff': row.get('kickoff'),
+            'kickoff': row.get('kickoff'), 'line_written': None,
         }
         existing[key] = record
         records.append(record)
@@ -981,11 +1037,12 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 fetched_flags[week_number] = qb_flag_fetcher(int(year), week_number)
             record['qb_flag'] = fetched_flags[week_number].get((record['home'], record['away']))
 
-    # Fill blank spreads from the sportsbook feed; a spread already in the sheet is never replaced, but a
-    # game that has not been played yet is checked against the current line, since a pick only holds at its number
+    # Spreads for games not yet played follow the sportsbook feed until kickoff: a blank spread is filled, and a spread
+    # this code wrote (remembered in Line Written) moves with the line, since a pick or teaser leg holds only at the line
+    # you can bet.  A spread typed into the sheet (the line you bet) is never replaced.
     spreads_filled = 0
     if spread_fetcher:
-        fetched_weeks = {}
+        fetched_weeks, logged = {}, None
         for record in records:
             if not str(record['week']).isdigit():
                 continue
@@ -1001,11 +1058,26 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             if line is None:
                 continue
             if not has_spread:
-                record['spread'] = line
+                record['spread'] = record['line_written'] = line
                 spreads_filled += 1
-            elif line != record['spread']:
-                logging.warning(f"Week {week_number} {record['away']} at {record['home']}: the sheet has a spread of {record['spread']:g} "
-                                f"but the current line is {line:g}; any pick on this game holds only at the line you can bet")
+                continue
+            spread = record['spread'] if _number(record['spread']) else None
+            if _number(record.get('line_written')):
+                written_by_code = spread == record['line_written']
+            else:
+                # workbooks from before Line Written: a spread equal to a DraftKings line a run logged was written by the code
+                logged = _logged_dk_lines(year) if logged is None else logged
+                written_by_code = spread in logged.get((week_number, record['home'], record['away']), ())
+            if line == spread:
+                if written_by_code:
+                    record['line_written'] = line
+            elif written_by_code:
+                logging.info(f"Week {week_number} {record['away']} at {record['home']}: the line moved from {spread:g} to {line:g}, "
+                             f"so the sheet now has {line:g} (type the line you bet into Home Spread to keep it)")
+                record['spread'] = record['line_written'] = line
+            else:
+                logging.warning(f"Week {week_number} {record['away']} at {record['home']}: kept the spread typed into the sheet "
+                                f"({record['spread']}); the current line is {line:g}, and a pick holds only at the line you can bet")
 
     # The fair line is the spread moved by the correction, so the model side always agrees with the pick.
     # Games without both numbers keep the stats-only line they were first written with.

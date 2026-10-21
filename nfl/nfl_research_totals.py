@@ -54,16 +54,21 @@ forecast checked shortly before kickoff said; available from 2018) gives the win
 three hours after.  Games: outdoor regular-season games, weeks 5-16, 2018 on, not at neutral sites.  Pass: the under
 hits >= 52.4% at the closing total when that forecast wind is 15 mph or more.  Also shown: the under by forecast wind
 band, how forecast and recorded wind compare, and the recorded-wind rule on the same games.
-Run it:  python nfl_research_totals.py forecast   (forecasts are cached in data_cache as wind_forecast_<team>_<season>.csv)
+Run it:  python nfl_research_totals.py forecast   (forecasts are cached in data_cache as wind_forecast_utc_<team>_<season>.csv)
 
-V1 result: PASS.  961 outdoor games since 2018 have a forecast; forecast and recorded wind correlate 0.76 (the
-forecast's 10 m wind averages 7.4 mph against 8.6 recorded, so 15 mph on the forecast flags fewer games).  Forecast wind
-of 15 mph or more: the under went 28-22 (56.0%, +8.4% ROI at the real closing odds; 2018 2-1, 2019 4-3, 2020 4-6, 2021
-6-3, 2022 5-2, 2023 2-2, 2024 0-1, 2025 5-4); the recorded-wind rule on the same games went 69-48 (59.0%).  By forecast
-band (diagnostic): 0-5 mph 45.3% (calm games go over), 5-10 mph 55.0%, 10-15 mph 60.4% (169 games, +17.0%), 15-20 mph
-53.5%, 20+ 5-2.  The forecast sorts games the way the recorded wind does, so the edge is not an artifact of weather
-surprises.  50 games is a small sample: the rule is a forward-tracking candidate, with 10-15 mph forecasts (seen here,
-not pre-registered) tracked beside it.
+V1 result: PASS, narrowly.  961 outdoor games since 2018 have a forecast; forecast and recorded wind correlate 0.73 (the
+forecast's 10 m wind averages 7.3 mph against 8.6 recorded, so 15 mph on the forecast flags fewer games).  Forecast wind
+of 15 mph or more: the under went 25-22 (53.2%, +3.0% ROI at the real closing odds; 2018 1-1, 2019 4-3, 2020 4-7, 2021
+6-3, 2022 4-2, 2023 1-2, 2024 1-1, 2025 4-3); the recorded-wind rule on the same games went 69-48 (59.0%).  By forecast
+band (diagnostic): 0-5 mph 45.7% (calm games go over), 5-10 mph 55.3%, 10-15 mph 60.4% (159 games, +16.9%), 15-20 mph
+50.0% (40 games), 20+ 5-2.  The forecast sorts games the way the recorded wind does (the under rises from calm to 10-15
+mph), so the edge is not an artifact of weather surprises, but 47 games is a small sample: the rule is a forward-
+tracking candidate, with 10-15 mph forecasts (seen here, not pre-registered) tracked beside it.
+Correction (October 20, 2026, same day): the first run read every November-January game's forecast an hour early
+(Open-Meteo labels local times with the time zone's current UTC offset for every date, so EST dates were read at EDT)
+and reported 28-22 (56.0%) on 50 games.  Forecasts are now requested in UTC and kickoffs converted with their own date's
+daylight-saving rule; the cache was converted (+4 hours) and checked against a fresh UTC download.  The numbers above
+are the corrected run.
 """
 
 import math
@@ -248,20 +253,22 @@ def stadium(team, season):
 
 
 def season_forecast(team, season):
-    """Hourly forecast wind (mph, Eastern time) at a team's home stadium for a season, cached in data_cache."""
+    """Hourly forecast wind (mph, UTC) at a team's home stadium for a season, cached in data_cache.  Requested in UTC
+    because Open-Meteo labels local times with the time zone's current UTC offset for every date, ignoring the
+    daylight-saving change of the date itself."""
     import os
     from datetime import date, timedelta
 
     import requests
     from nflverse_data import CACHE_DIR
-    path = os.path.join(CACHE_DIR, f'wind_forecast_{team}_{season}.csv')
+    path = os.path.join(CACHE_DIR, f'wind_forecast_utc_{team}_{season}.csv')
     if os.path.exists(path):
         return pd.read_csv(path)
     lat, lon = stadium(team, season)
     end = min(date(season + 1, 1, 15), date.today() - timedelta(days=1))
     response = requests.get(FORECAST_URL, timeout=60, params={
         'latitude': lat, 'longitude': lon, 'start_date': f'{season}-09-01', 'end_date': end.isoformat(),
-        'hourly': 'wind_speed_10m', 'wind_speed_unit': 'mph', 'timezone': 'America/New_York'})
+        'hourly': 'wind_speed_10m', 'wind_speed_unit': 'mph', 'timezone': 'GMT'})
     response.raise_for_status()
     hourly = response.json()['hourly']
     frame = pd.DataFrame({'time': hourly['time'], 'wind': hourly['wind_speed_10m']})
@@ -274,7 +281,8 @@ def forecast_check():
     t = totals_table(lab.default_table())
     f = t[(t['game_type'] == 'REG') & t['week'].between(*WEEKS) & t['total'].notna() & t['total_line'].notna()
           & (t['dome'] == 0) & (t['neutral'] == 0) & (t['season'] >= FORECAST_FIRST) & t['gametime'].notna()].copy()
-    kickoff = pd.to_datetime(f['gameday'] + ' ' + f['gametime']).dt.floor('H')
+    kickoff = (pd.to_datetime(f['gameday'] + ' ' + f['gametime']).dt.tz_localize('America/New_York')
+               .dt.tz_convert('UTC').dt.tz_localize(None).dt.floor('H'))
     winds = []
     for (team, season), games in f.groupby(['home_team', 'season']):
         hourly = season_forecast(team, int(season)).assign(time=lambda h: pd.to_datetime(h['time'])).set_index('time')['wind']

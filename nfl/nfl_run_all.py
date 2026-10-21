@@ -1,4 +1,4 @@
-"""One click for the weekly NFL flows: spread projections, player props and the wind-under check.
+"""One click for the weekly NFL flows: spread projections, player props and the weather-under check (wind and rain).
 
 Each flow runs as its own Python process, exactly as if it were started by hand (python nfl_prod_projections.py and so
 on): nothing is imported or shared between them, each keeps its own settings (the Configuration block at the bottom of
@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STEPS = (
     ('projections', 'nfl_prod_projections.py', 'spread projections, picks, favorite picks and teaser legs', '{season}_nfl_projections.xlsx'),
     ('props', 'nfl_prod_props.py', 'player prop picks', '{season}_nfl_props.xlsx'),
-    ('wind', 'nfl_wind_unders.py', 'wind check for totals', '{season}_wind_unders.csv'),
+    ('wind', 'nfl_wind_unders.py', 'weather check for totals (wind and rain unders)', '{season}_wind_unders.csv'),
 )
 OUTPUT_LINES = (re.compile(r'Projections spreadsheet updated: (.+?) \('), re.compile(r'Props workbook updated: (.+)$'),
                 re.compile(r'Season log: (.+)$'), re.compile(r'Logging to file: (.+)$'))

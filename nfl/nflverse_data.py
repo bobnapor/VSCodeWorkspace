@@ -11,6 +11,8 @@ TEAM_WEEK_URL = 'https://github.com/nflverse/nflverse-data/releases/download/sta
 INJURIES_URL = 'https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_{year}.csv'
 PLAYER_WEEK_URL = 'https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_{year}.csv'
 PLAYERS_URL = 'https://github.com/nflverse/nflverse-data/releases/download/players/players.csv'
+WEEKLY_ROSTERS_URL = 'https://github.com/nflverse/nflverse-data/releases/download/weekly_rosters/roster_weekly_{year}.csv'
+ROSTER_COLUMNS = ('season', 'week', 'game_type', 'team', 'position', 'full_name', 'gsis_id', 'status', 'status_description_abbr')
 
 
 def _cached_download(url, filename, refresh=False):
@@ -55,6 +57,13 @@ def load_player_weeks(first_season, last_season, refresh=False, columns=None):
 def load_players(refresh=False):
     """Every player nflverse knows, with the ids that link the sources: gsis_id (the stats' player_id) and espn_id."""
     return pd.read_csv(_cached_download(PLAYERS_URL, 'players.csv', refresh), low_memory=False)
+
+
+def load_weekly_rosters(first_season, last_season, refresh=False):
+    """Each team's roster week by week with every player's status: ACT active, RES on a reserve list (status_description_abbr
+    R01 is injured reserve), INA inactive, DEV practice squad, CUT released.  Players on injured reserve drop off the
+    weekly injury reports, so this is where a season-ending injury shows up."""
+    return _load_seasons(WEEKLY_ROSTERS_URL, 'roster_weekly_{year}.csv', first_season, last_season, refresh, ROSTER_COLUMNS)
 
 
 def _load_seasons(url_template, filename_template, first_season, last_season, refresh, columns=None):
