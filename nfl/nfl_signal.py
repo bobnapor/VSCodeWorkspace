@@ -12,6 +12,14 @@ as the correction grows.  The favorites it favors cover about 51%.  A narrower k
 2006-2026 went 53-50 on the untouched seasons and was dropped.  The correction's information (correlation about 0.07 with
 the cover margin) supports about 55%; 60% would need a signal roughly twice as informative.
 
+QB skip (October 21, 2026, nfl_research_qb.py, pre-registered): the ratings describe the team its recent starters
+played for, so an underdog pick is skipped when the underdog's quarterback swing (nfl_qb_swing: today's starter's
+rating minus the weighted rating of the starters behind the team's ratings) is QB_DOWNGRADE or worse, a backup in for a
+starter or a clearly worse quarterback.  Those picks went 51.6% (48.9% / 53.5% / 50.6% by era) against 55.5% with no
+downgrade on either side, and the correction's information in those games falls to about zero; adjusting the model
+for the swing did not help.  With the skip the picks covered 54.0% / 55.7% / 56.4% (about 9 fewer a season).  This
+week's games use projected starters (see nfl_qb_swing); a pick with no swing (no quarterback data) is not skipped.
+
 Teaser legs: the published Wong rule (6-point teasers through 3 and 7): underdogs of +1.5/+2.5 teased to +7.5/+8.5 and
 favorites of -7.5/-8.5 teased to -1.5/-2.5.  Legs won 74-76% in every era since 1999, weeks 5-16 (favorite legs only
 71% since 2018); a 2-team teaser needs 72.4% per leg at -110 and 73.9% at -120, and wins about 55-58% as one bet.
@@ -40,6 +48,7 @@ from nfl_injury_features import TEAM_FULL_NAMES
 SIGNAL_ALPHA = 10000.0
 SIGNAL_FEATURES = lab.PBP_FEATURES + lab.BOX_FEATURES + lab.BASIC_CONTEXT
 SIGNAL_THRESHOLD = 0.0    # any positive correction toward the underdog makes a pick
+QB_DOWNGRADE = -0.05      # ...unless the underdog's quarterback swing is this or worse (EPA per dropback; nfl_qb_swing)
 PICK_WEEKS = (5, 16)      # picks are made in these regular-season weeks only; early-season ratings are too thin
 BACKWARD_TRAIN = (2006, 2019)   # the untouched seasons are scored by a model fitted on these
 BACKWARD_TEST = (1999, 2005)
@@ -54,10 +63,24 @@ FAVORITE_ERAS = ((1999, 2005), (2006, 2017), (2018, None))
 HIT_RATE_BIN_STARTS = (-99.0, 0.0, 0.25, 0.5, 1.0)   # correction toward the underdog, in points; negative = toward the favorite
 
 
-def is_pick(toward_underdog, week, min_correction=SIGNAL_THRESHOLD):
-    """Whether a game is a straight pick: weeks 5-16 and the correction leans to the underdog (by at least `min_correction`)."""
+def is_pick(toward_underdog, week, min_correction=SIGNAL_THRESHOLD, dog_swing=None):
+    """Whether a game is a straight pick: weeks 5-16, the correction leans to the underdog (by at least `min_correction`),
+    and the underdog's quarterback swing (nfl_qb_swing) is not a downgrade (None or NaN: no quarterback data, no skip)."""
     return (PICK_WEEKS[0] <= week <= PICK_WEEKS[1] and toward_underdog is not None
-            and toward_underdog > 0 and toward_underdog >= min_correction)
+            and toward_underdog > 0 and toward_underdog >= min_correction and not qb_skip(dog_swing))
+
+
+def qb_skip(dog_swing):
+    """Whether the QB skip removes an underdog pick: the underdog's quarterback swing is QB_DOWNGRADE or worse."""
+    return dog_swing is not None and not pd.isna(dog_swing) and dog_swing <= QB_DOWNGRADE
+
+
+def dog_swings(frame):
+    """The underdog's quarterback swing for each row of a game frame (spread_line > 0: the home team is favored), or
+    NaN where the frame has no swings."""
+    if 'qb_swing_home' not in frame.columns:
+        return np.full(len(frame), np.nan)
+    return np.where(frame['spread_line'].to_numpy() > 0, frame['qb_swing_away'].to_numpy(float), frame['qb_swing_home'].to_numpy(float))
 
 
 def teaser_leg(home_spread, week):
@@ -118,17 +141,19 @@ def backtest_hit_rates(table, season):
 
     Scored on every season from 1999 through the games already played in `season`, each by a model that never saw it
     (see scored_history).  Returns [(bin start, cover rate, games)], one row per bin of HIT_RATE_BIN_STARTS; the first
-    bin (correction toward the favorite) is the favorite side's record, the rest the underdog side's.
+    bin (correction toward the favorite) is the favorite side's record, the rest the underdog side's, without the
+    underdogs the QB skip removes when `table` has quarterback swings (nfl_qb_swing.with_swings).
     """
     frame = scored_history(table, season)
     frame = frame[(frame['resid'] != 0) & (frame['spread_line'] != 0) & frame['week'].between(*PICK_WEEKS) & (frame['game_type'] == 'REG')]
     pred = frame['pred'].to_numpy()
     win = np.where(pred > 0, frame['resid'].to_numpy() > 0, frame['resid'].to_numpy() < 0)
     toward_underdog = np.where((pred > 0) == (frame['spread_line'].to_numpy() < 0), np.abs(pred), -np.abs(pred))
+    skipped = (toward_underdog >= 0) & np.array([qb_skip(s) for s in dog_swings(frame)], dtype=bool)
     rows = []
     for i, start in enumerate(HIT_RATE_BIN_STARTS):
         end = HIT_RATE_BIN_STARTS[i + 1] if i + 1 < len(HIT_RATE_BIN_STARTS) else np.inf
-        in_bin = (toward_underdog >= start) & (toward_underdog < end)
+        in_bin = (toward_underdog >= start) & (toward_underdog < end) & ~skipped
         rows.append((start, float(win[in_bin].mean()) if in_bin.any() else None, int(in_bin.sum())))
     return rows
 

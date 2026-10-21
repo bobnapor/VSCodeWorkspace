@@ -30,6 +30,8 @@ TEASER_FAV_LINES = (7.5, 8.5)
 TEASER_POINTS = 6
 # Favorite picks (see nfl_signal.py): night games, kickoff at this hour Eastern or later
 NIGHT_KICKOFF_HOUR = 19
+# The QB skip (see nfl_signal.py and nfl_qb_swing.py): no underdog pick when its quarterback swing is this or worse
+QB_DOWNGRADE = -0.05
 PLAYOFF_WEEK_NAMES = {'WC': 'WildCard', 'DIV': 'Division', 'CON': 'ConfChamp', 'SB': 'SuperBowl'}
 
 SHEET_THIS_WEEK, SHEET_LOG, SHEET_INFO = 'This Week', 'Season Log', 'Model Info'
@@ -43,7 +45,7 @@ LOG_LAYOUT = (
     ('fair_line', 'Fair Line (Home)'), ('fair_vs_spread', 'Fair Line vs Spread'), ('side', 'Model Side'),
     ('covering', 'Covering Team'), ('side_result', 'Model Side Result'), ('close', 'Closing Spread (Home)'),
     ('correction', 'Model Correction (Home)'), ('kickoff', 'Kickoff (ET)'), ('fav_clv', 'Fav Line vs Close'), ('year', 'Year'),
-    ('line_written', 'Line Written (Home)'),
+    ('line_written', 'Line Written (Home)'), ('home_swing', 'Home QB Swing'), ('away_swing', 'Away QB Swing'),
 )
 
 
@@ -63,7 +65,7 @@ LAST_COLUMN = len(LOG_LAYOUT)
 LOG_WIDTHS = {'week': 6, 'away': 20, 'home': 20, 'spread': 8, 'pick': 15, 'fav_pick': 15, 'teaser': 15, 'dog_correction': 9,
               'hit_rate': 8, 'actual': 9, 'result': 8, 'fav_result': 8, 'teaser_result': 8, 'clv': 8, 'qb_flag': 30, 'notes': 24,
               'reason': 90, 'fair_line': 9, 'fair_vs_spread': 9, 'side': 12, 'covering': 12, 'side_result': 9, 'close': 9,
-              'correction': 10, 'kickoff': 9, 'fav_clv': 9, 'year': 6, 'line_written': 9}
+              'correction': 10, 'kickoff': 9, 'fav_clv': 9, 'year': 6, 'line_written': 9, 'home_swing': 9, 'away_swing': 9}
 # The reason shows its headline (first line) only, so every game stays one row high; the full text is in the cell
 ONE_LINE_FIELDS = ('reason',)
 LOG_ROW_HEIGHT = 17
@@ -396,7 +398,16 @@ def _in_pick_weeks(record, settings):
 
 def _is_pick(record, settings):
     lean = _lean_to_dog(record)
-    return _in_pick_weeks(record, settings) and lean is not None and lean > 0 and lean >= settings['threshold']
+    return _in_pick_weeks(record, settings) and lean is not None and lean > 0 and lean >= settings['threshold'] and not _qb_skip(record)
+
+
+def _qb_skip(record):
+    """As nfl_signal.qb_skip: the underdog's quarterback swing (Home/Away QB Swing) is QB_DOWNGRADE or worse."""
+    spread = record['spread']
+    if not _number(spread) or spread == 0:
+        return False
+    swing = record.get('home_swing') if spread > 0 else record.get('away_swing')
+    return _number(swing) and swing <= QB_DOWNGRADE
 
 
 def _kickoff_text(value):
@@ -493,7 +504,8 @@ def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favo
         cell.fill = _fill(MANUAL_HEADER)
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
-    ws.cell(9, 1, 'A Pick is the underdog whenever the model leans to it by more than the minimum, in the pick weeks.').font = Font(italic=True, color=GRAY_TEXT)
+    ws.cell(9, 1, 'A Pick is the underdog whenever the model leans to it by more than the minimum, in the pick weeks, unless '
+                  'its quarterback is a downgrade.').font = Font(italic=True, color=GRAY_TEXT)
     ws.cell(10, 1, 'A Favorite Pick is the favorite in a night game (kickoff 7 pm Eastern or later) when the model leans to it by at '
                    'least its minimum, in the pick weeks.').font = Font(italic=True, color=GRAY_TEXT)
 
@@ -531,6 +543,8 @@ def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favo
     guide = (
         'This Week: the season scoreboard, then this week\'s picks with the reason for each, the teaser legs and every game.',
         'Pick: the underdog to bet, at the spread shown. The model leans to it; about 55% of these covered in every era tested.',
+        '     No pick when the underdog\'s quarterback is a downgrade: its QB swing (the projected starter\'s rating minus the',
+        '     quarterbacks behind the team\'s stats, Home/Away QB Swing at the right) is -0.05 or worse; such picks covered 52%.',
         'Favorite Pick: the favorite to lay points with, at the spread shown, in a Thursday, Sunday or Monday night game when the',
         '     model leans to it by 0.5 or more (56-65% in every era since 1999, about one a week; expect about 55%).',
         'Lean: how many points the model thinks the spread is off toward that team. Hist. Win %: how often that size of lean covered.',
@@ -576,10 +590,11 @@ def _write_log(ws, records, settings):
 
     centered = {'week', 'spread', 'pick', 'fav_pick', 'teaser', 'dog_correction', 'hit_rate', 'actual', 'result', 'fav_result',
                 'teaser_result', 'clv', 'fair_line', 'fair_vs_spread', 'side', 'covering', 'side_result', 'close', 'correction',
-                'kickoff', 'fav_clv', 'year', 'line_written'}
+                'kickoff', 'fav_clv', 'year', 'line_written', 'home_swing', 'away_swing'}
     formats = {'spread': SIGNED_GENERAL, 'close': SIGNED_GENERAL, 'actual': SIGNED_GENERAL, 'fair_line': '+0.0;-0.0;0.0',
                'fair_vs_spread': '+0.0;-0.0;0.0', 'dog_correction': '+0.0;-0.0;0.0', 'hit_rate': '0%', 'clv': '+0.0;-0.0;0.0',
-               'correction': '+0.00;-0.00;0.00', 'fav_clv': '+0.0;-0.0;0.0', 'line_written': SIGNED_GENERAL}
+               'correction': '+0.00;-0.00;0.00', 'fav_clv': '+0.0;-0.0;0.0', 'line_written': SIGNED_GENERAL,
+               'home_swing': '+0.00;-0.00;0.00', 'away_swing': '+0.00;-0.00;0.00'}
     outline = Side(style='medium', color=NAVY)
     row_of = {}
 
@@ -600,10 +615,12 @@ def _write_log(ws, records, settings):
             'week': record['week'], 'away': record['away'], 'home': record['home'], 'spread': record['spread'],
             'actual': record['actual'], 'reason': record.get('reason'), 'qb_flag': record.get('qb_flag'), 'notes': record['notes'],
             'fair_line': record['fair_line'], 'close': record.get('close'), 'correction': record['correction'], 'year': record['year'],
-            'line_written': record.get('line_written'),
+            'line_written': record.get('line_written'), 'home_swing': record.get('home_swing'), 'away_swing': record.get('away_swing'),
             # the correction measured toward the underdog (positive = the model likes the underdog more than the spread does)
             'dog_correction': f'=IF(OR({spread}="",{c["correction"]}="",{spread}=0),"",ROUND(IF({spread}>0,{c["correction"]},-{c["correction"]}),3))',
-            'pick': f'=IF({dog}="","",IF(AND({in_weeks},{dog}>0,{dog}>={setting["threshold"]}),'
+            # no pick when the underdog's quarterback swing is a downgrade (an empty swing counts as 0, no skip)
+            'pick': f'=IF({dog}="","",IF(AND({in_weeks},{dog}>0,{dog}>={setting["threshold"]},'
+                    f'IF({spread}>0,{c["home_swing"]},{c["away_swing"]})>{QB_DOWNGRADE:g}),'
                     f'IF({spread}>0,{home_name}&" +"&ABS({spread}),{away_name}&" +"&ABS({spread})),""))',
             'hit_rate': f'=IF({dog}="","",IFERROR(LOOKUP({dog},{hit_from},{hit_rate}),""))',
             'fair_vs_spread': f'={c["fair_line"]}+{spread}',
@@ -880,7 +897,11 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
 
     for record in this_week:
         r = row_of[(str(record['week']), str(record['year']), record['home'], record['away'])]
-        cells = (f'{_nick(record["away"])} @ {_nick(record["home"])}', ref('spread', r), _lean_text(record), either('pick', 'fav_pick', r),
+        lean = _lean_to_dog(record)
+        skipped = (_in_pick_weeks(record, settings) and lean is not None and lean > 0 and lean >= settings['threshold']
+                   and _qb_skip(record))
+        cells = (f'{_nick(record["away"])} @ {_nick(record["home"])}', ref('spread', r),
+                 _lean_text(record) + (', QB skip' if skipped else ''), either('pick', 'fav_pick', r),
                  ref('teaser', r), either('result', 'fav_result', r))
         for col, value in enumerate(cells, start=1):
             cell = ws.cell(row, col, value)
@@ -984,7 +1005,8 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             if not value('home'):
                 continue
             record = {field: value(field) for field in ('week', 'year', 'home', 'away', 'fair_line', 'spread', 'actual', 'notes',
-                                                         'qb_flag', 'correction', 'close', 'reason', 'kickoff', 'line_written')}
+                                                         'qb_flag', 'correction', 'close', 'reason', 'kickoff', 'line_written',
+                                                         'home_swing', 'away_swing')}
             record['week'] = week_value(record['week'])
             record['kickoff'] = _kickoff_text(record['kickoff'])
             key = game_key(record['week'], record['year'], record['home'], record['away'])
@@ -1006,6 +1028,9 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 record['reason'] = row['reason']
             if row.get('kickoff'):
                 record['kickoff'] = row['kickoff']
+            # quarterback swings follow the projected starters until the game is played, then stay as last computed
+            if record['actual'] in (None, '') and (row.get('home_swing') is not None or row.get('away_swing') is not None):
+                record['home_swing'], record['away_swing'] = row.get('home_swing'), row.get('away_swing')
             continue
         if row.get('backfill'):  # corrections for earlier weeks fill games already in the sheet but never add new ones
             continue
@@ -1013,7 +1038,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             'week': week_value(row['week']), 'year': int(row['year']), 'home': row['home_team'], 'away': row['away_team'],
             'fair_line': fair_line_as_home(float(row['projected'])), 'spread': None, 'actual': actuals.get(key), 'notes': None,
             'qb_flag': None, 'correction': row.get('correction'), 'close': None, 'reason': row.get('reason'),
-            'kickoff': row.get('kickoff'), 'line_written': None,
+            'kickoff': row.get('kickoff'), 'line_written': None, 'home_swing': row.get('home_swing'), 'away_swing': row.get('away_swing'),
         }
         existing[key] = record
         records.append(record)

@@ -138,8 +138,14 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
     # The underdog signal and the pick rules (straight underdog picks, favorite picks and Wong teaser legs); see nfl_signal.py
     try:
         import nfl_signal
-        with run.step(3, "Building play-by-play team ratings for the pick model"):
+        with run.step(3, "Building play-by-play team ratings for the pick model, and quarterback swings"):
             lab_table = lab.build_table(lab.ALL_PAIRS, refresh=True)
+            starters = {}
+            try:
+                import nfl_qb_swing
+                lab_table, starters = nfl_qb_swing.with_swings(lab_table, season, week)
+            except Exception as e:
+                logging.warning(f"Could not compute quarterback swings ({e}); no pick is skipped for a QB downgrade this run")
         with run.step(4, "Backtesting the pick model, favorite picks and teaser legs on every season since 1999"):
             hit_rates = nfl_signal.backtest_hit_rates(lab_table, season)
             logging.info("Backtest cover rate of the model's side by correction toward the underdog, weeks 5-16, 1999 to date "
@@ -164,11 +170,21 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                 found = reasons.get((week, row['home_team'], row['away_team']))
                 if found:
                     row['reason'] = found[1]
+            # each team's quarterback swing (nfl_qb_swing): the pick rule skips an underdog playing a downgraded quarterback
+            swing_of = {}
+            if 'qb_swing_home' in lab_table.columns:
+                for g in lab_table[(lab_table['season'] == season) & (lab_table['week'] == week)].itertuples():
+                    swing_of[(TEAM_FULL_NAMES.get(g.home_team, g.home_team), TEAM_FULL_NAMES.get(g.away_team, g.away_team))] = (
+                        g.qb_swing_home, g.qb_swing_away, g.game_id)
+            for row in final_rows:
+                home_swing, away_swing, _ = swing_of.get((row['home_team'], row['away_team']), (None, None, None))
+                row['home_swing'] = None if home_swing is None or np.isnan(home_swing) else round(float(home_swing), 3)
+                row['away_swing'] = None if away_swing is None or np.isnan(away_swing) else round(float(away_swing), 3)
             spreads = sheet.fetch_draftkings_spreads(season, week)
             in_pick_weeks = nfl_signal.PICK_WEEKS[0] <= week <= nfl_signal.PICK_WEEKS[1]
-            logging.info(f"\n=== PICKS: every underdog the correction favors, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]} "
-                         f"(about 55% in every era tested; 60% is not supported) ===")
-            details = {}
+            logging.info(f"\n=== PICKS: every underdog the correction favors, weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}, "
+                         f"unless its quarterback is a downgrade (about 55% in every era tested; 60% is not supported) ===")
+            details, dog_swing_of = {}, {}
             for row in final_rows:
                 line, correction = spreads.get((row['home_team'], row['away_team'])), row.get('correction')
                 if line is None or correction is None or line == 0:
@@ -176,7 +192,9 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                 home_is_dog = line > 0
                 team, points = (row['home_team'], line) if home_is_dog else (row['away_team'], -line)
                 details[(row['home_team'], row['away_team'])] = (team, points, correction if home_is_dog else -correction)
-            picks = [key for key, (team, points, toward_dog) in details.items() if nfl_signal.is_pick(toward_dog, week)]
+                dog_swing_of[(row['home_team'], row['away_team'])] = row['home_swing'] if home_is_dog else row['away_swing']
+            picks = [key for key, (team, points, toward_dog) in details.items()
+                     if nfl_signal.is_pick(toward_dog, week, dog_swing=dog_swing_of.get(key))]
             picks.sort(key=lambda key: -details[key][2])
             for key in picks:
                 team, points, toward_dog = details[key]
@@ -186,6 +204,13 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                     logging.info("    Why: " + found[1].replace('\n', '\n         '))
             if not in_pick_weeks:
                 logging.info(f"No picks: week {week} is outside weeks {nfl_signal.PICK_WEEKS[0]}-{nfl_signal.PICK_WEEKS[1]}")
+            for key, (team, points, toward_dog) in details.items():
+                if nfl_signal.is_pick(toward_dog, week) and key not in picks:
+                    side = 'home' if team == key[0] else 'away'
+                    qb, name, how = starters.get((swing_of[key][2], side), (None, None, 'unknown'))
+                    logging.info(f"Skipped (QB downgrade): {team} +{points:g} ({key[1]} at {key[0]}), correction {toward_dog:.1f} pts "
+                                 f"toward the underdog; projected starter {name or 'unknown'} ({how}), swing {dog_swing_of[key]:+.2f}: "
+                                 f"the ratings come from better quarterback play than this")
             logging.info(f"{len(picks)} picks this week. The sheet's fair line is the spread plus the correction; "
                          f"the stats-only projections above had no edge against the spread in testing")
             # favorite picks: a separate rule that needs a lean to the favorite, so it never touches an underdog pick
