@@ -1,4 +1,4 @@
-"""The yearly player-prop workbook, <Desktop>/<year>_nfl_props.xlsx, kept apart from the spread workbook.
+"""The yearly player-prop workbook, <Desktop>/NFL/<year>_nfl_props.xlsx, kept apart from the spread workbook.
 
 Three tabs, rebuilt every run after the picks already in the workbook are read back (by header text), so nothing typed
 in is lost:
@@ -78,7 +78,7 @@ def _header(cell, color=NAVY, font_color=WHITE):
 
 
 def workbook_path(year, output_dir=None):
-    output_dir = output_dir or sheet.get_desktop_path()
+    output_dir = output_dir or sheet.nfl_folder()
     os.makedirs(output_dir, exist_ok=True)
     return os.path.join(output_dir, f'{year}_nfl_props.xlsx')
 

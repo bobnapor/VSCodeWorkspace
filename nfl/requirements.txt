@@ -1,0 +1,22 @@
+# The packages the daily NFL run needs, for Python 3.8, at the versions its models were built and checked with
+# (pinned so another computer gets the same numbers).  setup.bat installs them:
+#     python -m pip install -r requirements.txt
+numpy==1.24.4
+pandas==2.0.3
+scikit-learn==0.24.2
+scipy==1.5.2
+openpyxl==3.1.5
+requests==2.24.0
+Pillow==7.2.0
+# what those need
+joblib==0.16.0
+threadpoolctl==2.1.0
+python-dateutil==2.9.0.post0
+pytz==2020.1
+tzdata==2024.1
+six==1.15.0
+et-xmlfile==2.0.0
+urllib3==1.25.11
+certifi==2024.2.2
+idna==2.10
+chardet==3.0.4

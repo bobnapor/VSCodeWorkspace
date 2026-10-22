@@ -1,20 +1,21 @@
-"""The day's shareable graphic of new picks from the three weekly flows, and the same picks as text, on the Desktop.
+"""The day's shareable graphic of new picks from the three weekly flows, and the same picks as text, in NFL\\Cards.
 
-It reads what the flows wrote, so it shares no logic with them and can run on its own at any time:
-  Spreads  <Desktop>/<season>_nfl_projections.xlsx: the week's underdog picks, favorite picks and teaser legs, from the
+It reads what the flows wrote (all in the NFL folder on the Desktop, nfl_sheet.nfl_folder), so it shares no logic with
+them and can run on its own at any time:
+  Spreads  NFL/<season>_nfl_projections.xlsx: the week's underdog picks, favorite picks and teaser legs, from the
            Season Log by nfl_sheet's Python versions of the workbook's formulas (checked to agree with them), at the
            spreads the sheet holds, so a line typed into the sheet is the one shown.
-  Props    <Desktop>/<season>_nfl_props.xlsx: the picks of the last props run (its This Week tab), only the strongest
+  Props    NFL/<season>_nfl_props.xlsx: the picks of the last props run (its This Week tab), only the strongest
            (PROP_GROUPS: overs the model gives 80%+, receptions overs, unders the model gives 80%+; 61-77% in the
            backtest against 54-57% for the rest).  Overs are picked early in the week and unders within 24 hours of
            kickoff, so the midweek card has the overs and game-day cards the unders.
-  Totals   <Desktop>/<season>_wind_unders.csv: the UNDER and RAIN flags of the latest weather check (WATCH is a
+  Totals   NFL/<season>_wind_unders.csv: the UNDER and RAIN flags of the latest weather check (WATCH is a
            tracking list, not a bet), only from a check within WEATHER_WINDOW_HOURS of kickoff (game day).
 The week is the earliest week of the season with an unplayed game, as in the flows; picks in games already under way
 are left off (SHOW_STARTED_GAMES).  Each section says when its lines or forecast were taken, since lines move.
 
 One card a day, of new picks only: a pick an earlier day's card showed is not shown again, even if its line moved
-(data_cache/share_card_log.csv, nfl_sheet.read_share_log, records every pick shown and the day it was).  A day's last
+(NFL\\data\\share_card_log.csv, nfl_sheet.read_share_log, records every pick shown and the day it was).  A day's last
 run is the one that counts: a later run on the same day replaces the earlier ones (their card files and log entries;
 picks in games already under way stay).  From the next day on, the flows keep a shared pick as it was shared (the
 projections workbook its spread and model inputs, the weather log its check), so it is tracked at the line that went
@@ -24,8 +25,8 @@ new week's spread, teaser and prop picks wait for a later card, since they were 
 
 The graphic is 1080 px wide: 1080 x 1350 (4:5, the tallest Instagram feed post, and fine for texts, X and Facebook)
 when the picks fit, shrinking the type a little first; otherwise taller.  The card shows everything shared (no "more"
-line): it is saved in the 'NFL picks' folder on the Desktop as '<season> week <N> - <day>.png', with the same picks as
-plain text, ready to paste into a message or a post, beside it as '<season> week <N> - <day>.txt'.
+line): it is saved in NFL\\Cards as '<season> week <N> - <day>.png', with the same picks as plain text, ready to paste
+into a message or a post, beside it as '<season> week <N> - <day>.txt'.
 
 So that people can choose which picks to follow, each section says how often its kind of pick has hit, and each prop
 its group's rate.  Each section has its own color: spreads blue, teaser legs purple, props yellow, game totals orange.
@@ -35,7 +36,7 @@ come from the projections workbook's Model Info, PROP_GROUPS and, for the weathe
 nfl_wind_unders.py (WEATHER_RATES).
 
 Run it from this folder:  python nfl_share_card.py
-The daily run (run_all.bat, the 'NFL daily run' shortcut) makes both after the three flows.
+The daily run (the 'NFL daily run' file on the Desktop, run_all.bat) makes both after the three flows.
 """
 
 import math
@@ -54,7 +55,7 @@ import nfl_sheet as sheet
 from nfl_injury_features import TEAM_FULL_NAMES, TEAM_RENAMES
 from nflverse_data import CACHE_DIR, load_games
 
-CARD_FOLDER = 'NFL picks'                  # the cards and lists go in this folder on the Desktop
+CARD_FOLDER = 'Cards'                      # the cards and lists go in this folder of the NFL folder
 
 WIDTH, HEIGHT_MIN, HEIGHT_FEED, HEIGHT_TALL = 1080, 1080, 1350, 1920
 # (type scale, tallest card) to try in turn: the feed shape, shrinking the type a little, then taller, up to 9:16
@@ -808,14 +809,14 @@ def make_files(season=None, show_started=False, note='', handle='', output_dir=N
     runs: their card files go, and the day's entries in the share log become this run's picks (picks in games already
     under way stay, since no later card can show them)."""
     season = season or sheet.get_current_season_year()
-    desktop = sheet.get_desktop_path()
+    source = sheet.nfl_folder()   # where the three flows write their files
     log_path = log_path or sheet.share_log_path()
     now = now or pd.Timestamp.now(tz='America/New_York').tz_localize(None)
     week, kickoffs, games = week_games(season)
-    spreads, legs, lines_at, dog_rate = spread_picks(os.path.join(desktop, f'{season}_nfl_projections.xlsx'), season, week,
+    spreads, legs, lines_at, dog_rate = spread_picks(os.path.join(source, f'{season}_nfl_projections.xlsx'), season, week,
                                                      kickoffs)
-    props, props_at = prop_picks(os.path.join(desktop, f'{season}_nfl_props.xlsx'), season, week, kickoffs)
-    totals, checked_at = total_picks(os.path.join(desktop, f'{season}_wind_unders.csv'), season, week)
+    props, props_at = prop_picks(os.path.join(source, f'{season}_nfl_props.xlsx'), season, week, kickoffs)
+    totals, checked_at = total_picks(os.path.join(source, f'{season}_wind_unders.csv'), season, week)
     groups = {'spreads': spreads, 'teasers': legs, 'props': card_props(props), 'totals': totals}
     groups = {kind: sorted(picks, key=lambda p, kind=kind: card_order(kind, p)) for kind, picks in groups.items()}
     if not show_started:
@@ -840,7 +841,7 @@ def make_files(season=None, show_started=False, note='', handle='', output_dir=N
     if repeats:
         print(f'Left off {repeats} pick(s) already on an earlier card')
     day = f'{now:%a %b} {now.day}'
-    folder = output_dir or os.path.join(desktop, CARD_FOLDER)
+    folder = output_dir or sheet.nfl_folder(CARD_FOLDER)
     base = os.path.join(folder, f'{season} week {week} - {day}')
 
     def started(key):
@@ -929,5 +930,5 @@ if __name__ == '__main__':
     SHOW_STARTED_GAMES = False          # True: keep picks in games already under way
     FOOTER = 'For entertainment only. Please bet responsibly.'
     HANDLE = ''                         # e.g. '@yourname', shown at the bottom right
-    OUTPUT_DIR = None                   # None: the 'NFL picks' folder on the Desktop
+    OUTPUT_DIR = None                   # None: NFL\Cards on the Desktop
     sys.exit(main(show_started=SHOW_STARTED_GAMES, note=FOOTER, handle=HANDLE, output_dir=OUTPUT_DIR))

@@ -21,7 +21,7 @@ For one week (default: the next week with unplayed games):
    pre-registered, so it is tracked separately).  RAIN is a separate flag with its own record: 0.5+ mm of rain over the
    game, no snow, in a game the wind rule does not flag UNDER (a game can be WATCH and RAIN); RAIN games with 9+ mph of
    wind are noted as the strongest spot and get a record line of their own.
-5. A season log, <Desktop>/<season>_wind_unders.csv: one row per outdoor game with its latest check before kickoff
+5. A season log, <Desktop>/NFL/<season>_wind_unders.csv: one row per outdoor game with its latest check before kickoff
    (forecast wind and rain, total, flags), and the final total and the under's result once it is played, so the live
    record builds up.  A game whose under went out on an earlier day's share card (nfl_share_card.py) keeps the check it
    was shared with, so it is graded at the total that went out.
@@ -176,7 +176,7 @@ def main(season=None, week=None, output_dir=None):
         print(f'No games in {season} week {week}')
         return
     totals = fetch_totals(season, week)
-    path = os.path.join(output_dir or sheet.get_desktop_path(), f'{season}_wind_unders.csv')
+    path = os.path.join(output_dir or sheet.nfl_folder(), f'{season}_wind_unders.csv')
     log = pd.read_csv(path).reindex(columns=LOG_COLUMNS) if os.path.exists(path) else pd.DataFrame(columns=LOG_COLUMNS)
     # games whose under went out on an earlier day's share card keep the check it was shared with (and its total)
     shared = sheet.shared_games(season, ('total',))

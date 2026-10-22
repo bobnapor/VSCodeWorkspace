@@ -28,7 +28,12 @@ HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
                          'Chrome/130.0.0.0 Safari/537.36', 'Accept': 'application/json'}
 PROVIDERS = {100: 'DraftKings', 58: 'ESPN BET'}
 FIRST_PROP_SEASON = 2024   # ESPN's prop feed has only a handful of lines per game before 2024
-SNAPSHOT_LOG = os.path.join(CACHE_DIR, 'prop_line_log.csv')
+
+
+def snapshot_log_path():
+    """NFL\\data\\prop_line_log.csv: the prop lines as each run saw them, with the rest of the daily run's files."""
+    import nfl_sheet
+    return os.path.join(nfl_sheet.nfl_folder('data'), 'prop_line_log.csv')
 
 # market key: (ESPN prop type id, label, nflverse stat columns summed for the result)
 MARKETS = {
@@ -220,7 +225,7 @@ def attach_players(lines, players):
 
 
 def append_prop_snapshot(lines):
-    """Append the lines as they stand now to data_cache/prop_line_log.csv (timestamped); returns the rows added.
+    """Append the lines as they stand now to NFL\\data\\prop_line_log.csv (timestamped); returns the rows added.
 
     The ESPN feed keeps only the opening and the latest line, so this log is what shows how a line moved between the
     time a bet was placed and kickoff.
@@ -228,7 +233,8 @@ def append_prop_snapshot(lines):
     if lines.empty:
         return 0
     frame = lines.assign(logged_at=datetime.now().isoformat(timespec='seconds'))
-    frame.to_csv(SNAPSHOT_LOG, mode='a', header=not os.path.exists(SNAPSHOT_LOG), index=False)
+    path = snapshot_log_path()
+    frame.to_csv(path, mode='a', header=not os.path.exists(path), index=False)
     return len(frame)
 
 

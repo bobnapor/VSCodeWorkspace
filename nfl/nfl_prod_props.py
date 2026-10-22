@@ -9,9 +9,9 @@ Two rules (nfl_prop_signal.py), each with its own forecast model (nfl_prop_model
           lines, so an under is picked only within 24 hours of its game's kickoff (UNDER_WINDOW_HOURS) and once the
           game's final injury report is in nflverse's data: the daily run on game day picks them up.
           On since October 21, 2026 (SIDES below).
-Picks go best first, with the worst price still worth taking, to a log file and to <Desktop>/<year>_nfl_props.xlsx
-(nfl_props_sheet.py).  Earlier picks are graded from nflverse results, and the week's lines are appended to
-data_cache/prop_line_log.csv so the picks' closing-line value can be measured.
+Picks go best first, with the worst price still worth taking, to a log file (NFL\logs) and to
+<Desktop>/NFL/<year>_nfl_props.xlsx (nfl_props_sheet.py).  Earlier picks are graded from nflverse results, and the
+week's lines are appended to NFL\data\prop_line_log.csv so the picks' closing-line value can be measured.
 The spread runner and its workbook are not touched.  Run it from this folder:  python nfl_prod_props.py
 """
 
@@ -65,7 +65,7 @@ RULE_LINES = (
     "Forecasts: one gradient-boosted model per market on nflverse box scores, game lines, injury reports and starting "
     f"QBs, refitted each season on the {pm.TRAIN_SEASONS} seasons before it; the chances come from what happened after "
     f"similar out-of-sample forecasts in the previous {pm.DIST_SEASONS} seasons.",
-    "Lines: DraftKings via ESPN's public odds API, logged at every run in data_cache/prop_line_log.csv.  Line vs Close: "
+    "Lines: DraftKings via ESPN's public odds API, logged at every run in NFL\\data\\prop_line_log.csv.  Line vs Close: "
     "how many more units of the stat your line gave than the closing line (positive = beat the close).",
     "Voids: DraftKings voids a prop when the player does not play; a pick whose player has no stats in a finished game "
     "is marked Void (check it if he played and simply recorded nothing).",
@@ -182,8 +182,9 @@ def closing_lookup(line_history, now=None):
     """
     now = now or pd.Timestamp.now(tz='UTC')
     closes = {}
-    if os.path.exists(pl.SNAPSHOT_LOG):
-        snaps = pd.read_csv(pl.SNAPSHOT_LOG, dtype={'espn_event': str, 'espn_athlete': str})
+    snapshot_log = pl.snapshot_log_path()
+    if os.path.exists(snapshot_log):
+        snaps = pd.read_csv(snapshot_log, dtype={'espn_event': str, 'espn_athlete': str})
         if {'gsis_id', 'kickoff', 'logged_at'} <= set(snaps.columns):
             kick = pd.to_datetime(snaps['kickoff'], utc=True)
             logged = pd.to_datetime(snaps['logged_at']).dt.tz_localize('America/New_York', ambiguous='NaT',
@@ -264,7 +265,7 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
     predict_year / predict_week default to the current season's next unplayed week.
     """
     sides = [side for side in ('Over', 'Under') if side in sides]
-    log_dir = log_dir or os.path.expanduser('~')
+    log_dir = log_dir or sheet.nfl_folder('logs')
     log_filename = os.path.join(log_dir, f'nfl_props_{datetime.now():%Y%m%d_%H%M%S}.txt')
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
                         handlers=[logging.FileHandler(log_filename), logging.StreamHandler()], force=True)
@@ -426,7 +427,7 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                      + f", {graded} earlier picks graded")
         try:
             logged = pl.append_prop_snapshot(lines)
-            logging.info(f"Logged {logged} prop lines to {pl.SNAPSHOT_LOG}")
+            logging.info(f"Logged {logged} prop lines to {pl.snapshot_log_path()}")
         except Exception as e:
             logging.warning(f"Could not log the prop line snapshot: {e}")
 

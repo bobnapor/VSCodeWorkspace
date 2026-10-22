@@ -5,6 +5,7 @@ adds them to the season spreadsheet (nfl_sheet.py). Run it from this folder:  py
 """
 
 import logging
+import os
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -88,7 +89,7 @@ def project_week(table, season, week, runs=BOOTSTRAP_RUNS, progress=None):
 
 def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
     """Project one week. predict_year / predict_week default to the current season and its next unplayed week."""
-    log_filename = f'C:/Users/Bobby/nfl_predictions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+    log_filename = os.path.join(sheet.nfl_folder('logs'), f'nfl_predictions_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt')
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',

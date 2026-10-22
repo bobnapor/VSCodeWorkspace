@@ -154,6 +154,17 @@ def get_desktop_path():
     return buf.value
 
 
+def nfl_folder(*sub):
+    """The folder (made if missing) for everything the daily run reads and writes: <Desktop>\\NFL, with the tracking
+    workbooks and weather log, and its Cards, data (the share log and line logs) and logs folders.  The Desktop syncs
+    with OneDrive, so a computer signed into the same account has all of it; nothing the run needs stays on one
+    computer except the download cache (data_cache), which rebuilds itself.  The NFL_FOLDER environment variable
+    points it elsewhere."""
+    path = os.path.join(os.environ.get('NFL_FOLDER') or os.path.join(get_desktop_path(), 'NFL'), *sub)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 DRAFTKINGS_BOOK_ID = 68  # "DK NJ" on Action Network
 ACTION_NETWORK_SCOREBOARD_URL = 'https://api.actionnetwork.com/web/v2/scoreboard/nfl'
 
@@ -279,8 +290,7 @@ def _logged_dk_lines(year):
     """{(week, home, away): DraftKings home spreads the runs logged in line_log.csv} for `year`, full team names.  Lets a
     workbook from before the Line Written column tell a spread this code wrote from one typed in."""
     from nfl_injury_features import TEAM_FULL_NAMES
-    from nflverse_data import CACHE_DIR
-    path = os.path.join(CACHE_DIR, 'line_log.csv')
+    path = line_log_path()
     try:
         log = pd.read_csv(path)
     except (OSError, ValueError):
@@ -296,9 +306,13 @@ def _logged_dk_lines(year):
 # ---------------------------------------------------------------- picks the share card has shown
 
 def share_log_path():
-    """data_cache/share_card_log.csv: every pick a share card (nfl_share_card.py) has shown, by the day it first did."""
-    from nflverse_data import CACHE_DIR
-    return os.path.join(CACHE_DIR, 'share_card_log.csv')
+    """NFL\\data\\share_card_log.csv: every pick a share card (nfl_share_card.py) has shown, by the day it did."""
+    return os.path.join(nfl_folder('data'), 'share_card_log.csv')
+
+
+def line_log_path():
+    """NFL\\data\\line_log.csv: the spreads and betting splits as each run saw them (nfl_market_moves)."""
+    return os.path.join(nfl_folder('data'), 'line_log.csv')
 
 
 def today_eastern():
@@ -985,7 +999,7 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None,
                                   hit_rate_table=None, teaser_table=None, closing_lookup=None, current_week=None, favorite_table=None,
                                   locked_games=None):
-    """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
+    """Write projections to <Desktop>/NFL/<year>_nfl_projections.xlsx (nfl_folder), appending to it if it already exists.
 
     The workbook is the season's running log: each run adds its week's games in week order (a week run after later
     weeks is inserted after the weeks before it), keeps every spread and note, refreshes final margins
@@ -1006,7 +1020,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     """
     from openpyxl import Workbook, load_workbook
 
-    output_dir = output_dir or get_desktop_path()
+    output_dir = output_dir or nfl_folder()
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f'{year}_nfl_projections.xlsx')
 
