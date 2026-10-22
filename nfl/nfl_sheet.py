@@ -293,6 +293,52 @@ def _logged_dk_lines(year):
     return lines
 
 
+# ---------------------------------------------------------------- picks the share card has shown
+
+def share_log_path():
+    """data_cache/share_card_log.csv: every pick a share card (nfl_share_card.py) has shown, by the day it first did."""
+    from nflverse_data import CACHE_DIR
+    return os.path.join(CACHE_DIR, 'share_card_log.csv')
+
+
+def today_eastern():
+    """Today's date in Eastern time, 'YYYY-MM-DD': the day a run belongs to."""
+    return pd.Timestamp.now(tz='America/New_York').strftime('%Y-%m-%d')
+
+
+def read_share_log(path=None):
+    columns = ['season', 'week', 'key', 'pick', 'shown_on']
+    path = path or share_log_path()
+    return pd.read_csv(path, dtype=str).reindex(columns=columns) if os.path.exists(path) else pd.DataFrame(columns=columns)
+
+
+def shared_games(season, kinds, path=None, now=None):
+    """{(week, away code, home code)} of `season`'s games with a pick of one of `kinds` ('spread', 'teaser', 'prop',
+    'total') that a share card showed on an earlier day than today, or today in a game that has kicked off.  A day's
+    last run sets what its card shared (a later run on the same day replaces the earlier ones), and from then on the
+    flows keep those picks as they were shared, so they are tracked at the line that went out.  A game shared today
+    that has kicked off is final too, since no later card can show it again."""
+    now = now if now is not None else pd.Timestamp.now(tz='America/New_York').tz_localize(None)
+    today = now.strftime('%Y-%m-%d')
+    log = read_share_log(path)
+    log = log[(log['season'] == str(season)) & (log['shown_on'] <= today) & log['key'].str.split('|').str[0].isin(kinds)]
+    kickoff = {}
+    if (log['shown_on'] == today).any():
+        from nfl_injury_features import TEAM_RENAMES
+        from nflverse_data import load_games
+        schedule = load_games()
+        for g in schedule[schedule['season'] == int(season)].itertuples():
+            when = pd.Timestamp(f'{g.gameday} {g.gametime}') if isinstance(g.gametime, str) else pd.Timestamp(g.gameday)
+            kickoff[(int(g.week), TEAM_RENAMES.get(g.away_team, g.away_team), TEAM_RENAMES.get(g.home_team, g.home_team))] = when
+    games = set()
+    for week, key, day in zip(log['week'], log['key'], log['shown_on']):
+        away, _, home = key.rsplit('|', 1)[1].partition('@')
+        game = (int(week), away, home)
+        if day < today or kickoff.get(game, pd.Timestamp.max) <= now:
+            games.add(game)
+    return games
+
+
 # ---------------------------------------------------------------- reading an existing workbook
 
 def _field_columns(ws):
@@ -937,20 +983,24 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
 # ---------------------------------------------------------------- the writer
 
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None,
-                                  hit_rate_table=None, teaser_table=None, closing_lookup=None, current_week=None, favorite_table=None):
+                                  hit_rate_table=None, teaser_table=None, closing_lookup=None, current_week=None, favorite_table=None,
+                                  locked_games=None):
     """Write projections to <Desktop>/<year>_nfl_projections.xlsx, appending to it if it already exists.
 
     The workbook is the season's running log: each run adds its week's games in week order (a week run after later
-    weeks is inserted after the weeks before it), keeps every spread, note and recorded correction or reason, refreshes
-    final margins (`actual_lookup`, {(week, year, home, away): difference}, played games only, so 0 is a tie) and closing spreads (`closing_lookup`) for
-    games that have been played, fills blank spreads from `spread_fetcher(year, week)` (DraftKings via Action Network
-    in production) and moves a spread this code wrote (remembered in Line Written) with the line until the game is played,
-    while a spread typed into the sheet is never replaced, and refreshes QB notes for unplayed games from
-    `qb_flag_fetcher(year, week)`.  The fair line is the spread moved by the model correction, so the model side always
-    agrees with the pick.  `rows` may carry a 'reason' (the plain-words explanation), kept once recorded like the
-    correction, and a 'kickoff' ('HH:MM' Eastern, which decides favorite picks), refreshed whenever a row brings one
-    since the league can move a game into or out of a night slot.  `current_week` is the week the This Week tab shows
-    (default: the week of the rows passed in).  `favorite_table` is nfl_signal.favorite_backtest's [(era, rate, games)].
+    weeks is inserted after the weeks before it), keeps every spread and note, refreshes final margins
+    (`actual_lookup`, {(week, year, home, away): difference}, played games only, so 0 is a tie) and closing spreads
+    (`closing_lookup`) for games that have been played, fills blank spreads from `spread_fetcher(year, week)`
+    (DraftKings via Action Network in production) and moves a spread this code wrote (remembered in Line Written) with
+    the line until the game is played, while a spread typed into the sheet is never replaced, and refreshes QB notes for
+    unplayed games from `qb_flag_fetcher(year, week)`.  An unplayed game's model correction, reason, kickoff and
+    quarterback swings follow the latest run, until a pick on it has gone out on an earlier day's share card
+    (`locked_games`, nfl_sheet.shared_games: {(week, away code, home code)}): from then on its spread, correction,
+    reason, kickoff and swings stay as they were shared, so the pick is tracked at the line that went out (a line typed
+    into the sheet still wins).  Played games keep what was recorded; a blank correction or reason is still filled (the
+    backfill of earlier weeks).  The fair line is the spread moved by the model correction, so the model side always
+    agrees with the pick.  `current_week` is the week the This Week tab shows (default: the week of the rows passed
+    in).  `favorite_table` is nfl_signal.favorite_backtest's [(era, rate, games)].
 
     Returns (output_path, rows_added, actuals_updated, spreads_filled).
     """
@@ -982,6 +1032,10 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
 
     def game_key(week, game_year, home, away):
         return (str(week_value(week)), str(game_year), home, away)
+
+    from nfl_injury_features import TEAM_FULL_NAMES
+    locked = {game_key(week, year, TEAM_FULL_NAMES.get(home, home), TEAM_FULL_NAMES.get(away, away))
+              for week, away, home in (locked_games or ())}
 
     def played_actual(actual):
         # Unplayed games carry a placeholder difference of 0 in `rows`
@@ -1020,17 +1074,23 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     for row in rows:
         key = game_key(row['week'], row['year'], row['home_team'], row['away_team'])
         if key in existing:
-            # the correction and its reason are recorded once, like the fair line, so the sheet shows what was known
             record = existing[key]
-            if record['correction'] in (None, ''):
-                record['correction'] = row.get('correction')
-            if record.get('reason') in (None, '') and row.get('reason'):
-                record['reason'] = row['reason']
-            if row.get('kickoff'):
-                record['kickoff'] = row['kickoff']
-            # quarterback swings follow the projected starters until the game is played, then stay as last computed
-            if record['actual'] in (None, '') and (row.get('home_swing') is not None or row.get('away_swing') is not None):
-                record['home_swing'], record['away_swing'] = row.get('home_swing'), row.get('away_swing')
+            if record['actual'] in (None, '') and key not in locked:
+                # an unplayed game follows the latest run until a pick on it has gone out on an earlier day's card
+                if row.get('correction') is not None:
+                    record['correction'] = row['correction']
+                if row.get('reason'):
+                    record['reason'] = row['reason']
+                if row.get('kickoff'):
+                    record['kickoff'] = row['kickoff']
+                if row.get('home_swing') is not None or row.get('away_swing') is not None:
+                    record['home_swing'], record['away_swing'] = row.get('home_swing'), row.get('away_swing')
+            else:
+                # played, or shared on an earlier day's card: what was recorded stays (a blank is still filled)
+                if record['correction'] in (None, ''):
+                    record['correction'] = row.get('correction')
+                if record.get('reason') in (None, '') and row.get('reason'):
+                    record['reason'] = row['reason']
             continue
         if row.get('backfill'):  # corrections for earlier weeks fill games already in the sheet but never add new ones
             continue
@@ -1081,6 +1141,12 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
                 fetched_weeks[week_number] = spread_fetcher(int(year), week_number)
             line = fetched_weeks[week_number].get((record['home'], record['away']))
             if line is None:
+                continue
+            key = game_key(record['week'], record['year'], record['home'], record['away'])
+            if has_spread and key in locked:
+                if _number(record['spread']) and line != record['spread']:
+                    logging.info(f"Week {week_number} {record['away']} at {record['home']}: kept {record['spread']:g}, the line a "
+                                 f"pick on this game went out at on an earlier day's card (the line now: {line:g})")
                 continue
             if not has_spread:
                 record['spread'] = record['line_written'] = line

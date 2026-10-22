@@ -4,8 +4,11 @@ Two rules (nfl_prop_signal.py), each with its own forecast model (nfl_prop_model
   Overs   the early-week model (only what is known when props open: no injury report, opening spreads and totals)
           gives the over 65% or more, while DraftKings' line is still at its opening number.  The market moves toward
           these overs during the week, so they must be bet early: run this as soon as the week's props are posted.
+          No over for a player back from an absence (his team played 3+ games since his last: the returner skip).
   Unders  the full model (final injury report, closing game lines) gives the under 65% or more; they hold at closing
-          lines, so they suit bets placed near kickoff.  Off by default (SIDES in the __main__ block).
+          lines, so an under is picked only within 24 hours of its game's kickoff (UNDER_WINDOW_HOURS) and once the
+          game's final injury report is in nflverse's data: the daily run on game day picks them up.
+          On since October 21, 2026 (SIDES below).
 Picks go best first, with the worst price still worth taking, to a log file and to <Desktop>/<year>_nfl_props.xlsx
 (nfl_props_sheet.py).  Earlier picks are graded from nflverse results, and the week's lines are appended to
 data_cache/prop_line_log.csv so the picks' closing-line value can be measured.
@@ -28,7 +31,7 @@ from nfl_injury_features import TEAM_RENAMES
 from nfl_prod_projections import RunLog, find_next_week_to_predict
 
 TOTAL_STEPS = 7
-DEFAULT_SIDES = ('Over',)
+DEFAULT_SIDES = ('Over', 'Under')
 # How each side is picked: the model variant, the lines its backtest record is graded at, and its rule
 RULES = {
     'Over': dict(early=True, graded_at='open', label='overs at opening lines', markets=ps.OVER_MARKETS,
@@ -47,9 +50,14 @@ RULE_LINES = (
     f"Late overs: an over still at its opener within {ps.OVER_LATE_HOURS} hours of kickoff is almost surely a line the "
     "market never moves, and those won only about 52% in the backtest; such picks are marked LATE and priced at that "
     "rate, so their Bet At asks for about even money.",
-    f"Under rule (shown when SIDES includes 'Under'): bet the Under when the full model (final injury report, closing game "
-    f"lines) gives it {ps.MIN_CHANCE:.0%} or more, in " + ', '.join(pl.MARKETS[m][1] for m in ps.PICK_MARKETS)
-    + ".  It holds at closing lines, so it suits bets placed close to kickoff.",
+    f"Returner skip: no over pick for a player whose team has played {ps.RETURNER_MISSED}+ games since his last game "
+    f"(week {ps.RETURNER_FIRST_WEEK} on).  The models build his numbers from his last games played, however long ago, so "
+    "after an absence they forecast his old role: receiving forecasts for such players ran 20-30% high, and their overs "
+    "went 28-35 (44%) in the backtest.",
+    f"Under rule: bet the Under when the full model (final injury report, closing game lines) gives it {ps.MIN_CHANCE:.0%} "
+    "or more, in " + ', '.join(pl.MARKETS[m][1] for m in ps.PICK_MARKETS)
+    + f".  It holds at closing lines, so unders are picked only within {ps.UNDER_WINDOW_HOURS} hours of their game's "
+    "kickoff, once its final injury report is in nflverse's data: the daily run on game day picks them up.",
     "Left out: passing TDs and interceptions (books move the price rather than the line, so a win rate at the line says "
     "little without prices); the under rule also leaves out pass attempts and completions (no information there).",
     f"Bet At: the worst DraftKings price at which a pick still returns {ps.MIN_EDGE:.0%} on average at its Hist. Win %. "
@@ -238,6 +246,18 @@ def qualifies(side, r, week):
     return ps.is_pick(r.market, r.side, r.chance, week)
 
 
+def final_reports(injuries, week_games, season, week):
+    """The game ids of the week whose final injury report is in nflverse's data: a game status (Out, Doubtful or
+    Questionable) for either team.  Game statuses appear only on a game's final report, which reaches nflverse by about
+    9 AM Eastern the next day; before that the under model would run without the report the under rule was tested with."""
+    if injuries is None or injuries.empty:
+        return set()
+    rows = injuries[(injuries['season'] == season) & (injuries['week'] == week)
+                    & injuries['report_status'].isin(['Out', 'Doubtful', 'Questionable'])]
+    teams = set(rows['team'].replace(TEAM_RENAMES))
+    return {g.game_id for g in week_games.itertuples() if g.home_team in teams or g.away_team in teams}
+
+
 def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, sides=DEFAULT_SIDES):
     """Find this week's prop picks for `sides` ('Over' and/or 'Under').
 
@@ -288,13 +308,19 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
         # every season with lines needs the forecasts of the DIST_SEASONS seasons before it
         first = min(season, pl.FIRST_PROP_SEASON) - pm.DIST_SEASONS
         line_history = pl.attach_players(pl.load_line_history(games, list(range(pl.FIRST_PROP_SEASON, season + 1))), players)
+        # games each player's team played since his previous game, for the over rule's returner skip
+        appearances = weeks[weeks['position'].isin(pm.OFFENSE_POSITIONS)][['player_id', 'game_id', 'team']]
+        appearances = appearances.drop_duplicates(['player_id', 'game_id'])
+        history_missed = appearances.assign(missed=pm.games_missed(weeks, games, appearances)).rename(
+            columns={'player_id': 'gsis_id'})[['gsis_id', 'game_id', 'missed']]
         for side in sides:
             v, rule = variants[side], RULES[side]
             forecasts = pd.concat([pm.forecast_history(v['frame'], list(range(first, season)),
                                                        variant='early' if rule['early'] else ''),
                                    pm.season_forecasts(v['frame'], season, v['models'])], ignore_index=True)
             v['dists'] = pm.distributions(forecasts, season)
-            history = rule['picks'](ps.score_history(line_history, forecasts, rule['graded_at']))
+            scored_history = ps.score_history(line_history, forecasts, rule['graded_at'])
+            history = rule['picks'](scored_history.merge(history_missed, on=['gsis_id', 'game_id'], how='left'))
             v['rates'], v['overall'] = ps.market_win_rates(history, markets=rule['markets'])
             logging.info(f"Backtest record of the {side.lower()} rule ({rule['label']}, 2024 on): " + ', '.join(
                 f"{m} {w}-{l}" for m, (_, w, l) in v['rates'].items())
@@ -311,7 +337,12 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
         now = pd.Timestamp.now(tz='UTC')
         hours_left = {g.game_id: (pl.kickoff_utc(g.gameday, g.gametime) - now).total_seconds() / 3600
                       for g in week_games.itertuples()}
-        picks = []
+        week_missed = dict(zip(zip(upcoming['player_id'], upcoming['game_id']), pm.games_missed(weeks, games, upcoming))) \
+            if len(upcoming) else {}
+        waiting = [kickoffs[g][1] for g, hours in hours_left.items() if hours > ps.UNDER_WINDOW_HOURS]
+        reported = final_reports(injuries, week_games, season, week)
+        no_report = set()
+        picks, returners = [], []
         for side in sides:
             v = variants[side]
             week_fc = week_forecasts(v['frame'], v['models'], season, week)
@@ -319,6 +350,15 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
             side_picks = []
             for r in scored.itertuples() if len(scored) else []:
                 if qualifies(side, r, week):
+                    if side == 'Under' and hours_left[r.game_id] > ps.UNDER_WINDOW_HOURS:
+                        continue
+                    if side == 'Under' and r.game_id not in reported:
+                        no_report.add(kickoffs[r.game_id][1])
+                        continue
+                    missed = week_missed.get((r.gsis_id, r.game_id))
+                    if side == 'Over' and ps.returner_skip(missed, week):
+                        returners.append((r, missed, week_fc[(r.gsis_id, r.game_id, r.market)][1]['team']))
+                        continue
                     hist, note = v['rates'].get(r.market, (v['overall'], 0, 0))[0], None
                     if side == 'Over' and hours_left[r.game_id] < ps.OVER_LATE_HOURS and v.get('late_rate') is not None:
                         hist = v['late_rate']
@@ -331,8 +371,15 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                 logging.info(f"\n=== OVER PICKS, week {week}: overs the early-week model gives {ps.OVER_MIN_CHANCE:.0%}+ "
                              f"while the line is still at its opener ({len(side_picks)} of {len(scored)} lines) ===")
             else:
-                logging.info(f"\n=== UNDER PICKS, week {week}: unders the full model gives {ps.MIN_CHANCE:.0%}+ "
-                             f"({len(side_picks)} of {len(scored)} lines) ===")
+                logging.info(f"\n=== UNDER PICKS, week {week}: unders the full model gives {ps.MIN_CHANCE:.0%}+, in games "
+                             f"within {ps.UNDER_WINDOW_HOURS} hours of kickoff ({len(side_picks)} of {len(scored)} lines) ===")
+                if waiting:
+                    logging.info(f"Unders are picked within {ps.UNDER_WINDOW_HOURS} hours of kickoff (after the final "
+                                 f"injury report, near the closing line the rule was tested at): {len(waiting)} of "
+                                 f"{len(hours_left)} games are further out; the daily run on their game day picks them up.")
+                if no_report:
+                    logging.info(f"No unders yet for {', '.join(sorted(no_report))}: its final injury report is not in "
+                                 f"nflverse yet (it usually is by 9 AM Eastern the day after it is released).")
             for p in side_picks:
                 bet_at = f"{p['bet_at']:+d} or better" if p['bet_at'] is not None else "a price you judge fair"
                 hist = f"{p['hist']:.1%}" if p['hist'] is not None else "n/a"
@@ -340,6 +387,11 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                              f"model {p['chance']:.0%}, backtest {hist}, bet at {bet_at}")
                 logging.info(f"    Why: {p['why']}")
             if side == 'Over' and len(scored):
+                for r, missed, team in returners:
+                    logging.info(f"Skipped (back from absence): {r.player_name} ({team}) Over {float(r.line):g} "
+                                 f"{pl.MARKETS[r.market][1]} - {kickoffs[r.game_id][1]}: his team has played {missed:g} "
+                                 f"games since his last, and forecasts for players back from {ps.RETURNER_MISSED}+ missed "
+                                 f"games ran 20-30% high (README section 11.8)")
                 gone = sum(1 for r in scored.itertuples() if r.side == 'Over' and r.market in ps.OVER_MARKETS
                            and r.chance >= ps.OVER_MIN_CHANCE and not qualifies(side, r, week))
                 if gone:
@@ -352,6 +404,15 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
     with run.step(6, "Grading earlier picks and saving a snapshot of this week's lines"):
         path = props_sheet.workbook_path(season, output_dir)
         records = props_sheet.read_log(path)
+        # a later run on the same day replaces that day's earlier picks: the day's last run is the one that counts.  Kept:
+        # picks from earlier days, graded ones, ones you typed a price or note on, and ones whose game has kicked off
+        today = sheet.today_eastern()
+        started = {g for g, hours in hours_left.items() if hours <= 0}
+        before = len(records)
+        records = [r for r in records if not (
+            str(r.get('logged_at') or '').startswith(today) and r.get('outcome') in (None, '')
+            and r.get('price') in (None, '') and r.get('notes') in (None, '') and r.get('game_id') not in started)]
+        replaced = before - len(records)
         known = {props_sheet.pick_key(r) for r in records}
         stamp = datetime.now().isoformat(timespec='seconds')
         added = 0
@@ -361,7 +422,8 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                 added += 1
         records.sort(key=lambda r: (int(r.get('season') or season), int(r.get('week') or 0)))
         graded = grade_records(records, weeks, games, closing_lookup(line_history))
-        logging.info(f"{added} new picks logged, {graded} earlier picks graded")
+        logging.info(f"{added} picks logged" + (f" ({replaced} logged earlier today replaced by this run's)" if replaced else '')
+                     + f", {graded} earlier picks graded")
         try:
             logged = pl.append_prop_snapshot(lines)
             logging.info(f"Logged {logged} prop lines to {pl.SNAPSHOT_LOG}")
@@ -370,11 +432,30 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
 
     with run.step(7, "Writing the props workbook"):
         try:
-            note = None if len(lines) else "No DraftKings prop lines were found for the games left this week."
+            notes = [] if len(lines) else ["No DraftKings prop lines were found for the games left this week."]
+            if returners:
+                notes.append("Skipped (back from absence, the returner skip): " + '; '.join(
+                    f"{r.player_name} Over {float(r.line):g} {pl.MARKETS[r.market][1]} (his team has played {missed:g} "
+                    f"games since his last)" for r, missed, _ in returners) + ".")
+            under_empty = None
+            if 'Under' in sides and (waiting or no_report):
+                later = []
+                if waiting:
+                    later.append(f"unders for the {len(waiting)} later game(s) ({', '.join(waiting)}) come on the daily "
+                                 f"run within {ps.UNDER_WINDOW_HOURS} hours of their kickoff")
+                if no_report:
+                    later.append(f"unders for {', '.join(sorted(no_report))} wait for the final injury report to reach "
+                                 "nflverse (usually by 9 AM Eastern the next day)")
+                text = '; '.join(later)
+                if any(p['side'] == 'Under' for p in picks):
+                    notes.append(text[0].upper() + text[1:] + '.')
+                else:
+                    under_empty = f"None yet: {text}."
+            note = ' '.join(notes) or None
             rule_records = [(f"Record of the {side.lower()} rule ({RULES[side]['label']}, 2024 on), by market",
                              variants[side]['rates'], variants[side]['overall']) for side in sides]
             props_sheet.write_workbook(path, season, week, picks, records, rule_records, RULE_LINES, EVIDENCE,
-                                       skipped=skipped, note=note, sides=sides)
+                                       skipped=skipped, note=note, sides=sides, under_empty=under_empty)
             logging.info(f"Props workbook updated: {path}")
         except Exception as e:
             logging.error(f"Could not write the props workbook (close it in Excel and run again): {e}")
@@ -386,6 +467,6 @@ if __name__ == "__main__":
     # Configuration
     PREDICT_YEAR = None  # None = current season; set a year to override
     PREDICT_WEEK = None  # None = first week with unplayed games; set a week number to override
-    SIDES = ('Over',)    # ('Over', 'Under') adds the under picks, which suit bets placed close to kickoff
+    SIDES = ('Over', 'Under')    # ('Over',) for the overs only; the unders suit bets placed close to kickoff
 
     main(predict_year=PREDICT_YEAR, predict_week=PREDICT_WEEK, sides=SIDES)

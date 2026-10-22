@@ -279,6 +279,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                 final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
                 qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates, teaser_table=teaser_rates,
                 favorite_table=favorite_rates, closing_lookup=closing_lookup, current_week=final_rows[0]['week'],
+                locked_games=sheet.shared_games(season, ('spread', 'teaser')),
             )
             logging.info(
                 f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "

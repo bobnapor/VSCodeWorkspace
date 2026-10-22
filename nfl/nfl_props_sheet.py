@@ -3,12 +3,14 @@
 Three tabs, rebuilt every run after the picks already in the workbook are read back (by header text), so nothing typed
 in is lost:
   This Week   the season scoreboard (overall and by side) and this run's picks, best first: overs to bet now at
-              DraftKings' opening line and, when enabled, unders to bet near kickoff; each with the line and where it
+              DraftKings' opening line and unders to bet near kickoff (picked within 24 hours of each game's kickoff);
+              each with the line and where it
               opened, the forecast, the model's chance, the backtest win rate and the worst price still worth taking.
   Prop Log    every pick logged this season, graded from nflverse results, with its closing line.  Type the price you
               got in Your Price (yellow; blank counts as -110) and anything else in Notes.
   Model Info  the pick rule, the backtest record behind Hist. Win %, and how to read the workbook.
-A pick is logged the first time it qualifies and kept as it was (a later run adds new picks only), so the log shows the
+A pick is logged the first time a day's last run has it and kept as it was after that day (a later run on the same day
+replaces that day's earlier picks; later days add new picks only), so the log shows the
 line that was available when the pick was made.  The file is saved to a temporary copy and swapped in, so a failed
 save (for example with the workbook open in Excel) never leaves a half-written file.
 """
@@ -136,8 +138,9 @@ def _write_log(ws, records):
     ws.column_dimensions.group(get_column_letter(FIRST_DETAIL), get_column_letter(len(LOG_LAYOUT)), hidden=True)
 
 
-def _write_picks(ws, row, title, picks):
-    """A titled table of picks starting at `row`; returns the next free row."""
+def _write_picks(ws, row, title, picks, empty=None):
+    """A titled table of picks starting at `row`; returns the next free row.  `empty`: the line shown when there are
+    none (it starts with 'None', which the share card reads as the end of the section)."""
     ws.cell(row, 1, title).font = Font(bold=True, size=12, color=NAVY)
     row += 1
     for c, (key, header, width) in enumerate(THIS_WEEK_LAYOUT, start=1):
@@ -157,11 +160,11 @@ def _write_picks(ws, row, title, picks):
                 cell.font = Font(bold=True)
     if not picks:
         row += 1
-        ws.cell(row, 1, "None: no line met the rule (or no DraftKings lines are posted yet for the games left).")
+        ws.cell(row, 1, empty or "None: no line met the rule (or no DraftKings lines are posted yet for the games left).")
     return row + 2
 
 
-def _write_this_week(ws, year, week, picks, skipped, updated_at, note, sides):
+def _write_this_week(ws, year, week, picks, skipped, updated_at, note, sides, under_empty=None):
     log = f"'{SHEET_LOG}'!"
     outcome, side = f"{log}{LETTER['outcome']}:{LETTER['outcome']}", f"{log}{LETTER['side']}:{LETTER['side']}"
     ws['A1'] = f"NFL player prop picks: week {week}, {year}"
@@ -197,7 +200,8 @@ def _write_this_week(ws, year, week, picks, skipped, updated_at, note, sides):
         row = _write_picks(ws, row, f"Over picks ({len(overs)}): bet now, at DraftKings' opening line; once the line moves "
                                     f"the edge is gone", overs)
     if 'Under' in sides:
-        row = _write_picks(ws, row, f"Under picks ({len(unders)}): best bet close to kickoff", unders)
+        row = _write_picks(ws, row, f"Under picks ({len(unders)}): bet close to kickoff (picked on game day)", unders,
+                           under_empty)
     notes = []
     if skipped:
         notes.append(f"Not evaluated (already kicked off, or no ESPN event): {', '.join(skipped)}.")
@@ -251,13 +255,14 @@ def _write_info(ws, rule_lines, records, evidence):
 
 
 def write_workbook(path, year, week, picks, records, rule_records, rule_lines, evidence, skipped=(), note=None,
-                   sides=('Over', 'Under')):
+                   sides=('Over', 'Under'), under_empty=None):
     """Write the three tabs to `path` (see the module docstring).  `records` is the whole Prop Log, in order;
-    `rule_records` the backtest tables for Model Info; `sides` which pick sections This Week shows."""
+    `rule_records` the backtest tables for Model Info; `sides` which pick sections This Week shows; `under_empty` the
+    line shown when there are no unders (e.g. none yet, as they are picked on game day)."""
     wb = Workbook()
     this_week = wb.active
     this_week.title = SHEET_THIS_WEEK
-    _write_this_week(this_week, year, week, picks, list(skipped), datetime.now(), note, sides)
+    _write_this_week(this_week, year, week, picks, list(skipped), datetime.now(), note, sides, under_empty)
     _write_log(wb.create_sheet(SHEET_LOG), records)
     _write_info(wb.create_sheet(SHEET_INFO), rule_lines, rule_records, evidence)
     wb.active = 0

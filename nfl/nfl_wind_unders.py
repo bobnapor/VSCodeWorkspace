@@ -23,10 +23,11 @@ For one week (default: the next week with unplayed games):
    wind are noted as the strongest spot and get a record line of their own.
 5. A season log, <Desktop>/<season>_wind_unders.csv: one row per outdoor game with its latest check before kickoff
    (forecast wind and rain, total, flags), and the final total and the under's result once it is played, so the live
-   record builds up.
+   record builds up.  A game whose under went out on an earlier day's share card (nfl_share_card.py) keeps the check it
+   was shared with, so it is graded at the total that went out.
 
-Forecasts more than a day or two out are rough, rain timing most of all: run it again close to kickoff (Thursday for
-Thursday games, Saturday night or Sunday morning for Sunday games) and bet the line you can get.  The edge was measured
+Forecasts more than a day or two out are rough, rain timing most of all, so the daily run checks every day and the
+share card shows a flag only from a check within 36 hours of kickoff; bet the line you can get.  The edge was measured
 at the closing total, which already includes the forecast, so betting near kickoff is enough; in windy games the total
 fell about a point from open to close (2007-2021), so once the forecast is settled, earlier is better.
 
@@ -177,6 +178,8 @@ def main(season=None, week=None, output_dir=None):
     totals = fetch_totals(season, week)
     path = os.path.join(output_dir or sheet.get_desktop_path(), f'{season}_wind_unders.csv')
     log = pd.read_csv(path).reindex(columns=LOG_COLUMNS) if os.path.exists(path) else pd.DataFrame(columns=LOG_COLUMNS)
+    # games whose under went out on an earlier day's share card keep the check it was shared with (and its total)
+    shared = sheet.shared_games(season, ('total',))
 
     print(f'Weather check, {season} week {week} (run {now:%a %b %d %I:%M %p} ET), from week {FIRST_FLAG_WEEK}. UNDER at '
           f'{UNDER_MPH:g}+ mph, WATCH at {WATCH_MPH:g}-{UNDER_MPH:g} mph, RAIN at {RAIN_MM:g}+ mm of rain without an UNDER; '
@@ -195,9 +198,11 @@ def main(season=None, week=None, output_dir=None):
         kickoff = pd.Timestamp(f'{g.gameday} {g.gametime}')
         hours = (kickoff - now).total_seconds() / 3600
         line = totals.get((home, away))
-        if hours <= 0:
-            note = 'kicked off'
-            logged = log[log['game_id'] == g.game_id]
+        logged = log[log['game_id'] == g.game_id]
+        kept = (week, g.away_team, g.home_team) in shared and len(logged) > 0
+        if hours <= 0 or kept:
+            note = 'kicked off' if hours <= 0 else (f'kept as shared on an earlier day\'s card (total '
+                                                     f'{pd.to_numeric(logged["total"], errors="coerce").iloc[0]:g})')
             wind, rain = (float(pd.to_numeric(logged[c], errors='coerce').iloc[0]) if len(logged) else float('nan') for c in ('wind_mph', 'rain_mm'))
             game_flag = logged['flag'].iloc[0] if len(logged) and isinstance(logged['flag'].iloc[0], str) else ''
             wet_flag = logged['rain_flag'].iloc[0] if len(logged) and isinstance(logged['rain_flag'].iloc[0], str) else ''

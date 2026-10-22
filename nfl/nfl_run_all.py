@@ -1,13 +1,21 @@
-"""One click for the weekly NFL flows: spread projections, player props and the weather-under check (wind and rain).
+"""The daily NFL run, one click: spread projections, player props and the weather-under check (wind and rain), then
+the day's shareable graphic of new picks, with the same picks as text, in the 'NFL picks' folder on the Desktop.
+
+Run it once a day, around 10 AM Eastern, with no options (double-click the 'NFL daily run' shortcut or run_all.bat):
+every flow picks only what is worth betting at that moment (overs early in the week, unders within 24 hours of
+kickoff, weather from a near-kickoff forecast), and the card shows only picks no earlier day's card showed.  The
+schedule, day by day, is at the top of README.md.
 
 Each flow runs as its own Python process, exactly as if it were started by hand (python nfl_prod_projections.py and so
 on): nothing is imported or shared between them, each keeps its own settings (the Configuration block at the bottom of
 each script), logging and output files, and a failure in one does not stop the others.  They run one after another
-rather than side by side because two of them refresh the same nflverse files in data_cache.
+rather than side by side because two of them refresh the same nflverse files in data_cache.  The last step,
+nfl_share_card.py, only reads what the flows wrote (it changes none of their logic or files).
 
-Double-click run_all.bat (or a shortcut to it), or run from this folder:
-    python nfl_run_all.py                     every flow
-    python nfl_run_all.py projections wind    only the flows named (projections, props, wind)
+Options, not needed day to day:
+    python nfl_run_all.py projections wind    only the flows named (projections, props, wind), then the card
+    python nfl_run_all.py card                only the card (from the files the flows last wrote)
+    python nfl_run_all.py nocard              every flow, no card (nocard works with flow names too)
 
 Everything the flows print is shown as it happens and saved to ~/nfl_run_all_<timestamp>.txt.  A summary at the end
 lists each flow's result and time, any errors worth a look, and the files it updated.  Before starting, it checks that
@@ -22,15 +30,20 @@ import time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# (name, script, what it does, the Desktop file it writes)
+# (name, script, what it does, the Desktop file it writes that Excel could hold open); the card comes last, as it reads
+# what the flows before it wrote
 STEPS = (
     ('projections', 'nfl_prod_projections.py', 'spread projections, picks, favorite picks and teaser legs', '{season}_nfl_projections.xlsx'),
     ('props', 'nfl_prod_props.py', 'player prop picks', '{season}_nfl_props.xlsx'),
     ('wind', 'nfl_wind_unders.py', 'weather check for totals (wind and rain unders)', '{season}_wind_unders.csv'),
+    ('card', 'nfl_share_card.py', "the day's shareable graphic and text list of new picks", None),
 )
+CARD, NO_CARD = 'card', 'nocard'
 OUTPUT_LINES = (re.compile(r'Projections spreadsheet updated: (.+?) \('), re.compile(r'Props workbook updated: (.+)$'),
-                re.compile(r'Season log: (.+)$'), re.compile(r'Logging to file: (.+)$'))
+                re.compile(r'Season log: (.+)$'), re.compile(r'Logging to file: (.+)$'), re.compile(r'Share card saved: (.+)$'),
+                re.compile(r'Pick list saved: (.+)$'), re.compile(r'^((?:No new picks|No picks yet|Held back) .+)$'))
 PROBLEM_LINES = re.compile(r' - ERROR - |Traceback \(most recent call last\)|^\w*Error: |Could not ')
+NEXT_RUN = 'Next run: tomorrow, around 10 AM Eastern (the daily schedule is at the top of nfl\\README.md).'
 
 
 def desktop_files(names):
@@ -41,7 +54,8 @@ def desktop_files(names):
         desktop, season = get_desktop_path(), get_current_season_year()
     except Exception:
         return {}
-    return {name: os.path.join(desktop, pattern.format(season=season)) for name, _, _, pattern in STEPS if name in names}
+    return {name: os.path.join(desktop, pattern.format(season=season)) for name, _, _, pattern in STEPS
+            if name in names and pattern}
 
 
 def locked(paths):
@@ -126,17 +140,33 @@ def summarize(results, log_path, started):
         if len(r['problems']) > 5:
             lines.append('%12s ! ... %d more, see the full output' % ('', len(r['problems']) - 5))
     lines.append('Full output: %s' % log_path)
+    lines.append(NEXT_RUN)
     return '\n'.join(lines)
+
+
+def chosen_steps(argv):
+    """The step names to run, in STEPS order, or an error message: every flow by default, the card after any flows
+    (unless nocard), and the card alone when it is the only one named."""
+    known = [name for name, _, _, _ in STEPS]
+    args = [a.lower() for a in argv]
+    named = [a for a in args if a != NO_CARD]
+    unknown = [a for a in named if a not in known]
+    if unknown:
+        return 'Unknown flow(s): %s.  Choose from: %s (and %s)' % (', '.join(unknown), ', '.join(known), NO_CARD)
+    chosen = set(named or known) | {CARD}
+    if NO_CARD in args:
+        chosen.discard(CARD)
+    if not chosen:
+        return 'Nothing to run.'
+    return [name for name in known if name in chosen]
 
 
 def main(argv):
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(errors='replace')
-    known = [name for name, _, _, _ in STEPS]
-    chosen = [a.lower() for a in argv] or known
-    unknown = [a for a in chosen if a not in known]
-    if unknown:
-        print('Unknown flow(s): %s.  Choose from: %s' % (', '.join(unknown), ', '.join(known)))
+    chosen = chosen_steps(argv)
+    if isinstance(chosen, str):
+        print(chosen)
         return 2
     steps = [s for s in STEPS if s[0] in chosen]
     started = time.time()

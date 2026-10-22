@@ -105,6 +105,41 @@ def outcome(frame, market):
     return values.sum(axis=1, min_count=len(columns))
 
 
+def games_missed(player_weeks, games, rows):
+    """For each of `rows` (player_id, game_id, team): how many games the team played (regular season and playoffs, by
+    game day) strictly between the player's previous game with stats (any team, offense) and this game; NaN for a player
+    with no earlier game in the data.  The measure behind the over rule's returner skip (nfl_prop_signal.returner_skip):
+    the features come from his last games played however long ago, so they do not see an absence."""
+    missed = np.full(len(rows), np.nan)
+    if not len(rows):
+        return missed
+    g = games.copy()
+    for column in ('home_team', 'away_team'):
+        g[column] = g[column].replace(TEAM_RENAMES)
+    g['day'] = pd.to_datetime(g['gameday'])
+    day_of = g.set_index('game_id')['day']
+    days = {team: np.sort(d.to_numpy()) for team, d in
+            pd.concat([g.set_index('home_team')['day'], g.set_index('away_team')['day']]).groupby(level=0)}
+    played = player_weeks[player_weeks['position'].isin(OFFENSE_POSITIONS)][['player_id', 'game_id']].copy()
+    played['day'] = played['game_id'].map(day_of)
+    played = played.dropna(subset=['day']).sort_values('day')
+    query = pd.DataFrame({'player_id': rows['player_id'].to_numpy(), 'team': rows['team'].replace(TEAM_RENAMES).to_numpy(),
+                          'day': rows['game_id'].map(day_of).to_numpy(), 'order': np.arange(len(rows))})
+    query = query.dropna(subset=['day']).sort_values('day')
+    found = pd.merge_asof(query, played[['player_id', 'day']].assign(previous=played['day']), on='day', by='player_id',
+                          allow_exact_matches=False, direction='backward')
+    for team, part in found.groupby('team'):
+        if team not in days:
+            continue
+        known = part['previous'].notna().to_numpy()
+        now = np.searchsorted(days[team], part['day'].to_numpy(), 'left')
+        before = np.searchsorted(days[team], part['previous'].fillna(pd.Timestamp('1900-01-01')).to_numpy(), 'right')
+        values = (now - before).astype(float)
+        values[~known] = np.nan
+        missed[part['order'].to_numpy()] = values
+    return missed
+
+
 def with_openers(games, openers):
     """The schedule with each game's opening spread and total in place of the closing ones, where ESPN has them.
 
