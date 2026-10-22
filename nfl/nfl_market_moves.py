@@ -35,7 +35,8 @@ def _fetch(season, week):
 
 def _book_line(game, book):
     spread = game.get('markets', {}).get(str(book), {}).get('event', {}).get('spread', [])
-    home = next((o for o in spread if o.get('side') == 'home'), None)
+    # a game under way also carries live in-game lines; the pre-game line it keeps is the closing line
+    home = next((o for o in spread if o.get('side') == 'home' and not o.get('is_live')), None)
     return home
 
 
@@ -75,7 +76,7 @@ def build_market_table(seasons=(2023, 2024, 2025, 2026), refresh=False):
 
 
 def append_line_snapshot(season, week):
-    """Append the lines and betting splits as they stand right now to line_log.csv, timestamped.
+    """Append the lines and betting splits as they stand right now to NFL\\data\\line_log.csv, timestamped.
 
     The public history only has the opening and closing numbers, so logging every run builds the record that
     would show how much a line moves between the time you bet and the close.  Returns the rows added.
@@ -87,6 +88,7 @@ def append_line_snapshot(season, week):
         return 0
     stamp = datetime.now().isoformat(timespec='seconds')
     frame = pd.DataFrame(rows).assign(logged_at=stamp)
-    path = os.path.join(CACHE_DIR, 'line_log.csv')
+    import nfl_sheet
+    path = nfl_sheet.line_log_path()   # NFL\data\line_log.csv, with the rest of the daily run's files
     frame.to_csv(path, mode='a', header=not os.path.exists(path), index=False)
     return len(frame)

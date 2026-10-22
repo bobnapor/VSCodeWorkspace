@@ -7,13 +7,15 @@ projected home margin. Everything a game's features use was known before kickoff
 can be built for past games (training and backtesting) and for upcoming ones (projections).
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 
-from nfl_injury_features import TEAM_FULL_NAMES, TEAM_RENAMES, build_injury_features
-from nflverse_data import load_games, load_injuries, load_player_weeks, load_team_weeks
+from nfl_injury_features import TEAM_FULL_NAMES, TEAM_RENAMES, build_injury_features, reserve_list
+from nflverse_data import load_games, load_injuries, load_player_weeks, load_team_weeks, load_weekly_rosters
 
 DATA_FIRST_SEASON = 2004   # team ratings warm up from here
 TRAIN_FIRST_SEASON = 2010  # first season used for fitting (quarterback features start in 2009)
@@ -180,6 +182,19 @@ def feature_columns(metrics, use_qb=True, use_elo=False):
     return columns
 
 
+def current_reserve_list(games, season, refresh=False):
+    """Players on reserve lists in the latest weekly roster of `season`, used for games not yet played (injured reserve
+    drops a player off the injury report; see nfl_injury_features.reserve_list).  Empty when every game has been played
+    or the roster cannot be loaded."""
+    if not games['result'].isna().any():
+        return {}
+    try:
+        return reserve_list(load_weekly_rosters(season, season, refresh=refresh), season)
+    except Exception as e:
+        logging.warning(f"Could not load the {season} weekly rosters ({e}); a starter on injured reserve will count as available")
+        return {}
+
+
 def load_inputs(refresh=False, last_season=None):
     """Raw nflverse inputs: games, per-team stat rows, quarterback features."""
     games = normalize_teams(load_games(refresh=refresh))
@@ -189,7 +204,8 @@ def load_inputs(refresh=False, last_season=None):
     last = int(games['season'].max())
     team_weeks = load_team_weeks(DATA_FIRST_SEASON, last, refresh=refresh)
     qb_features = build_injury_features(
-        games, load_injuries(2009, last, refresh=refresh), load_player_weeks(2009, last, refresh=refresh))
+        games, load_injuries(2009, last, refresh=refresh), load_player_weeks(2009, last, refresh=refresh),
+        reserve=current_reserve_list(games, last, refresh))
     return {'games': games, 'rows': build_team_rows(games, team_weeks), 'qb_features': qb_features}
 
 
@@ -233,11 +249,40 @@ def predict(fitted, frame):
     return fitted['model'].predict(X)
 
 
-def bootstrap_projection(train, frame, columns, runs=200, alpha=RIDGE_ALPHA, seed=0):
-    """Mean and spread of the projected home margin across `runs` models fitted to resampled training games."""
+def bootstrap_projection(train, frame, columns, runs=200, alpha=RIDGE_ALPHA, seed=0, progress=None):
+    """Projected home margin for `frame` from `runs` ridge regressions, each fitted to a bootstrap resample of `train`.
+
+    Each run draws len(train) training games with replacement, fills missing values with the sample's medians,
+    standardizes, fits the ridge and projects every game in `frame`; the mean across runs is the projection and the
+    spread across runs its uncertainty.  Same steps and random draws as fit()/predict() run in a loop, done in numpy so
+    thousands of runs take seconds.  `progress(done, runs)` is called about every 10% of the runs.
+    Returns an array of shape (runs, len(frame)).
+    """
     rng = np.random.default_rng(seed)
+    X = train[columns].to_numpy(dtype=float)
+    y = train['result'].to_numpy(dtype=float)
+    X_new = frame[columns].to_numpy(dtype=float)
+    n, p = X.shape
+    penalty = alpha * np.eye(p)
+    # medians are only needed where something is missing; other columns' fill values are never used
+    needs_fill = np.isnan(X).any(axis=0) | np.isnan(X_new).any(axis=0)
+    every = max(1, runs // 10)
     predictions = np.empty((runs, len(frame)))
     for i in range(runs):
-        sample = train.iloc[rng.integers(0, len(train), len(train))]
-        predictions[i] = predict(fit(sample, columns, alpha), frame)
+        rows = rng.integers(0, n, n)
+        sample, target = X[rows], y[rows]
+        fill = np.zeros(p)
+        if needs_fill.any():
+            fill[needs_fill] = np.nanmedian(sample[:, needs_fill], axis=0)
+            sample = np.where(np.isnan(sample), fill, sample)
+        mean, scale = sample.mean(axis=0), sample.std(axis=0)
+        scale[scale < 10 * np.finfo(float).eps] = 1.0          # as StandardScaler treats constant columns
+        z = (sample - mean) / scale
+        z_mean, y_mean = z.mean(axis=0), target.mean()
+        zc = z - z_mean
+        coef = np.linalg.solve(zc.T @ zc + penalty, zc.T @ (target - y_mean))
+        intercept = y_mean - z_mean @ coef
+        predictions[i] = ((np.where(np.isnan(X_new), fill, X_new) - mean) / scale) @ coef + intercept
+        if progress and ((i + 1) % every == 0 or i + 1 == runs):
+            progress(i + 1, runs)
     return predictions

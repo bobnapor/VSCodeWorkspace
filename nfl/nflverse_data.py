@@ -10,6 +10,9 @@ GAMES_URL = 'https://github.com/nflverse/nfldata/raw/master/data/games.csv'
 TEAM_WEEK_URL = 'https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_{year}.csv'
 INJURIES_URL = 'https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_{year}.csv'
 PLAYER_WEEK_URL = 'https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_{year}.csv'
+PLAYERS_URL = 'https://github.com/nflverse/nflverse-data/releases/download/players/players.csv'
+WEEKLY_ROSTERS_URL = 'https://github.com/nflverse/nflverse-data/releases/download/weekly_rosters/roster_weekly_{year}.csv'
+ROSTER_COLUMNS = ('season', 'week', 'game_type', 'team', 'position', 'full_name', 'gsis_id', 'status', 'status_description_abbr')
 
 
 def _cached_download(url, filename, refresh=False):
@@ -43,13 +46,29 @@ def load_injuries(first_season, last_season, refresh=False):
     return _load_seasons(INJURIES_URL, 'injuries_{year}.csv', first_season, last_season, refresh)
 
 
-def load_player_weeks(first_season, last_season, refresh=False):
-    """One row per player per game with passing, rushing and receiving stats and EPA, from 2009 on."""
-    return _load_seasons(PLAYER_WEEK_URL, 'stats_player_week_{year}.csv', first_season, last_season, refresh)
+def load_player_weeks(first_season, last_season, refresh=False, columns=None):
+    """One row per player per game with passing, rushing and receiving stats and EPA, from 2009 on.
+
+    `columns` limits the columns read (the files have about 150), which keeps many seasons small in memory.
+    """
+    return _load_seasons(PLAYER_WEEK_URL, 'stats_player_week_{year}.csv', first_season, last_season, refresh, columns)
 
 
-def _load_seasons(url_template, filename_template, first_season, last_season, refresh):
+def load_players(refresh=False):
+    """Every player nflverse knows, with the ids that link the sources: gsis_id (the stats' player_id) and espn_id."""
+    return pd.read_csv(_cached_download(PLAYERS_URL, 'players.csv', refresh), low_memory=False)
+
+
+def load_weekly_rosters(first_season, last_season, refresh=False):
+    """Each team's roster week by week with every player's status: ACT active, RES on a reserve list (status_description_abbr
+    R01 is injured reserve), INA inactive, DEV practice squad, CUT released.  Players on injured reserve drop off the
+    weekly injury reports, so this is where a season-ending injury shows up."""
+    return _load_seasons(WEEKLY_ROSTERS_URL, 'roster_weekly_{year}.csv', first_season, last_season, refresh, ROSTER_COLUMNS)
+
+
+def _load_seasons(url_template, filename_template, first_season, last_season, refresh, columns=None):
     """Cached per-season files; `refresh` re-downloads only the latest season, `refresh='all'` every season."""
+    wanted = None if columns is None else set(columns)
     frames = []
     for season in range(first_season, last_season + 1):
         force = refresh == 'all' or (bool(refresh) and season == last_season)
@@ -57,5 +76,5 @@ def _load_seasons(url_template, filename_template, first_season, last_season, re
             path = _cached_download(url_template.format(year=season), filename_template.format(year=season), force)
         except requests.RequestException:
             continue
-        frames.append(pd.read_csv(path, low_memory=False))
+        frames.append(pd.read_csv(path, low_memory=False, usecols=None if wanted is None else (lambda c: c in wanted)))
     return pd.concat(frames, ignore_index=True)
