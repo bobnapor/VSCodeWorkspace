@@ -25,7 +25,7 @@
 
 The code comes from GitHub and everything else from the synced NFL folder, so nothing on the first computer is needed:
 1. Install **Python 3.8.10** (Windows installer, 64-bit, from python.org) and git, sign into OneDrive with the same account (with Desktop backup on, so the Desktop and its NFL folder appear), and let the NFL folder finish syncing.
-2. Get the code: `git clone https://github.com/bobnapor/VSCodeWorkspace` and check out the branch these files are on (`feature/model-improvement`).
+2. Get the code: `git clone https://github.com/bobnapor/VSCodeWorkspace`. Once `feature/model-improvement` is merged into `master` (pull request opened October 22, 2026), the default branch has everything; until then, check out `feature/model-improvement`.
 3. Double-click **`setup.bat`** in the `nfl` folder, once. It installs the packages at the versions the models were built with (`requirements.txt`), records where that computer keeps the code and Python (the `NFL_CODE` and `NFL_PYTHON` settings), and puts the NFL folder and "NFL daily run" on the Desktop.
 4. Double-click "NFL daily run" as usual. The first run on a new computer takes longer (perhaps 20-30 minutes) while it downloads the nflverse data and rebuilds its forecast caches in `data_cache`; copying `nfl\data_cache` over from the first computer skips that.
 
@@ -35,7 +35,7 @@ The code comes from GitHub and everything else from the synced NFL folder, so no
 
 This document describes what the NFL system does today, how it works, what evidence supports it, what was tried and failed, and where it is weak. It is written so a fresh reader can restate the problem from scratch, look at the current state, and decide what to do next. Section 1 states the problem without reference to any solution; sections 2 onward describe the current solution. Read section 1, form your own plan, then compare it with the rest.
 
-Branch state (October 11, 2026): `master` holds an earlier "top 3 underdogs a week" version (`f8c86dc`). `feature/model-improvement` (pushed, not merged) holds everything described here: the validated rules, the untouched-data test that overturned the earlier key-number rule, and teaser legs.
+Branch state (October 22, 2026): everything described here was built on `feature/model-improvement` and proposed for `master` in a pull request that day; before that merge, `master` held an earlier "top 3 underdogs a week" version (`f8c86dc`). The branch holds the validated rules, the untouched-data test that overturned the earlier key-number rule, teaser legs, favorite picks, the QB skip, player props, weather unders and the daily run.
 
 ---
 
