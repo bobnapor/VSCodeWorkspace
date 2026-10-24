@@ -6,9 +6,10 @@ them and can run on its own at any time:
            Season Log by nfl_sheet's Python versions of the workbook's formulas (checked to agree with them), at the
            spreads the sheet holds, so a line typed into the sheet is the one shown.
   Props    NFL/<season>_nfl_props.xlsx: the picks of the last props run (its This Week tab), only the strongest
-           (PROP_GROUPS: overs the model gives 80%+, receptions overs, unders the model gives 80%+; 61-77% in the
-           backtest against 54-57% for the rest).  Overs are picked early in the week and unders within 24 hours of
-           kickoff, so the midweek card has the overs and game-day cards the unders.
+           (PROP_GROUPS: overs the model gives 80%+, receptions overs at lines of 2.5 or less, unders the model gives
+           80%+; 61-79% in the backtest against 54-57% for the rest), each at the workbook's Bet At, which goes by market
+           and line.  Overs are picked early in the week and unders within 24 hours of kickoff, so the midweek card has
+           the overs and game-day cards the unders.
   Totals   NFL/<season>_wind_unders.csv: the UNDER and RAIN flags of the latest weather check (WATCH is a
            tracking list, not a bet), only from a check within WEATHER_WINDOW_HOURS of kickoff (game day).
 The week is the earliest week of the season with an unplayed game, as in the flows; picks in games already under way
@@ -101,12 +102,15 @@ WEATHER_RATES = {'UNDER': 0.57, 'RAIN': 184 / (184 + 135)}
 # A weather flag goes on the card only from a check this close to kickoff: further out, the weather check marks its
 # forecast 'recheck near kickoff' (nfl_wind_unders.py), and the edge was measured on forecasts made close to kickoff
 WEATHER_WINDOW_HOURS = 36
-# The props strong enough for the card, and how often their group won (the rules' picks, ESPN BET 2024-2025 and
-# DraftKings 2026, pooled; analysis of October 22, 2026).  The model's chance ranks overs (54.5% below 80% outside
-# receptions, 74.6% at 80%+; 77.7% / 69.2% at 80%+ in the discovery / untouched test seasons) and receptions overs win
-# at any chance (65.3% / 68.8%); unders are flat at 55-57% except at 80%+ (61.3% / 63.2%).
+# The props strong enough for the card, and how often their group won (the rules' picks with the returner skip, ESPN
+# BET 2024-2025 and DraftKings 2026, pooled; analysis of October 22, 2026).  The model's chance ranks overs (54.5% below
+# 80% outside receptions; 79.2% of 101 at 80%+; 77.7% / 69.2% at 80%+ in the discovery / untouched test seasons) and
+# receptions overs at low lines win at any chance (69.7% of 313 at lines of 2.5 or less: 0.5 lines 71.2% / 68.0%, 1.5-2.5
+# lines 68.1% / 71.1%), while at 3.5 and up they won 56.6% (83) and are not on the card; unders are flat at 55-57%
+# except at 80%+ (61.3% / 63.2%).  Each prop's price is the props workbook's Bet At, by market and line.
 STRONG_CHANCE = 0.80
-PROP_GROUPS = {'over_strong': (0.767, 'overs the model gives 80%+'), 'receptions_over': (0.643, 'receptions overs'),
+PROP_GROUPS = {'over_strong': (0.792, 'overs the model gives 80%+'),
+               'receptions_over': (0.697, 'receptions overs at lines of 2.5 or less'),
                'under_strong': (0.615, 'unders the model gives 80%+')}
 KIND_NOTE = 'Hit rates are by kind of bet, not by pick: picks of the same kind are equally strong.'
 
@@ -779,8 +783,8 @@ def card_order(kind, pick):
 
 def card_props(props):
     """The props strong enough for the card, each with its group's hit rate as its confidence: overs the model gives
-    80%+, receptions overs, and unders the model gives 80%+ (PROP_GROUPS).  The rest (about 54-57%, not enough after
-    the usual juice) stay in the props workbook, as do late overs (about 54%)."""
+    80%+, receptions overs at lines of 2.5 or less, and unders the model gives 80%+ (PROP_GROUPS).  The rest (about
+    54-57%, not enough after the usual juice) stay in the props workbook, as do late overs (about 54%)."""
     chosen = []
     for p in props:
         group = prop_group(p)
@@ -795,7 +799,8 @@ def prop_group(pick):
         return None
     if pick['side'] == 'Over' and pick['chance'] >= STRONG_CHANCE:
         return 'over_strong'
-    if pick['side'] == 'Over' and pick['prop'] == 'Receptions':
+    if (pick['side'] == 'Over' and pick['prop'] == 'Receptions' and pick['line'] is not None
+            and prop_signal.line_group(pick['line']) != prop_signal.LINE_GROUPS[-1][0]):
         return 'receptions_over'
     if pick['side'] == 'Under' and pick['chance'] >= STRONG_CHANCE:
         return 'under_strong'
