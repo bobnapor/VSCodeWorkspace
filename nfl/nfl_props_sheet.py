@@ -210,8 +210,9 @@ def _write_this_week(ws, year, week, picks, skipped, updated_at, note, sides, un
     notes += [
         "Pick: the side to bet at the line shown.  Opened At: DraftKings' first line.  Forecast: the model's average "
         "result; Model Chance: how often similar forecasts went that way in past seasons.",
-        "Hist. Win %: how often the rule's picks in this market won (overs at opening lines, unders at closing lines, 2024 "
-        "on, shrunk toward all markets).  Bet At: the worst price that still returns 3% at that rate.  More on Model Info.",
+        "Hist. Win %: how often the rule's picks in this market at this kind of line (0.5, 1.5-2.5 or 3.5+) won (overs at "
+        "opening lines, unders at closing lines, 2024 on, shrunk toward all markets' picks at such lines).  Bet At: the "
+        "worst price that still returns 3% at that rate.  More on Model Info.",
     ]
     for text in notes:
         ws.cell(row, 1, text).font = Font(italic=True, color=GRAY_TEXT)
@@ -220,7 +221,7 @@ def _write_this_week(ws, year, week, picks, skipped, updated_at, note, sides, un
 
 
 def _write_info(ws, rule_lines, records, evidence):
-    """`records`: [(title, {market: (rate, wins, losses)}, overall rate)], one table per rule."""
+    """`records`: [(title, {'market, line group': (rate, wins, losses)}, overall rate)], one table per rule."""
     ws['A1'] = 'How the prop picks are made'
     ws['A1'].font = Font(bold=True, size=14, color=NAVY)
     row = 3
@@ -231,7 +232,7 @@ def _write_info(ws, rule_lines, records, evidence):
         row += 1
         ws.cell(row, 1, title).font = Font(bold=True, color=NAVY)
         row += 1
-        for c, header in enumerate(('Market', 'Wins', 'Losses', 'Win %', 'Hist. Win % used'), start=1):
+        for c, header in enumerate(('Market, line', 'Wins', 'Losses', 'Win %', 'Hist. Win % used'), start=1):
             _header(ws.cell(row, c, header))
         for market, (rate, wins, losses) in rates.items():
             row += 1
@@ -249,7 +250,7 @@ def _write_info(ws, rule_lines, records, evidence):
     for text in evidence:
         row += 1
         ws.cell(row, 1, text)
-    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['A'].width = 28
     for col in 'BCDE':
         ws.column_dimensions[col].width = 14
 

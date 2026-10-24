@@ -45,8 +45,15 @@ OVER_LATE_HOURS = 48
 RETURNER_MISSED, RETURNER_FIRST_WEEK = 3, 2
 
 MIN_EDGE = 0.03         # the price shown is the worst one at which a bet still returns 3% on average
-PRIOR_GAMES = 200       # shrinkage of each market's backtest win rate toward the rate of all picks (market_win_rates)
+PRIOR_GAMES = 200       # shrinkage of a market's backtest win rate toward its line group's (line_win_rates)
 CHANCE_BINS = (0.50, 0.55, 0.60, 0.65, 0.70)
+# Hist. Win % and Bet At go by market and line (adopted October 22, 2026): picks on low lines win far more often, as
+# books set low lines where the over is likely and price it heavily (receptions overs at the opening line, discovery
+# 2024-2025 / untouched test 2026: 0.5 lines 71.2% / 68.0%, 1.5-2.5 lines 68.1% / 71.1%, 3.5+ lines 54.7% / 57.1%),
+# so one rate per market set a wrong price both ways (receptions overs had -167 at every line, where the history
+# supports about -200 at 1.5 and about -114 at 3.5+).
+LINE_GROUPS = (('0.5', 0.5), ('1.5-2.5', 2.5), ('3.5+', float('inf')))
+MIN_LINE_GROUP_PICKS = 30   # a line group with fewer graded picks takes the rule's overall rate as its own
 
 
 def score_lines(rows, dists, line_column='line'):
@@ -205,7 +212,8 @@ def market_win_rates(picks, prior_games=PRIOR_GAMES, markets=None):
     """Backtest win rate of a rule's picks per market, shrunk toward the rate of all its picks.
 
     A market with few graded picks borrows `prior_games` picks' worth of the overall rate (empirical Bayes), so a
-    37% from 27 picks does not set a price on its own.  `markets` defaults to the under rule's.
+    37% from 27 picks does not set a price on its own.  `markets` defaults to the under rule's.  The daily run prices
+    picks by market and line instead (line_win_rates).
     Returns ({market: (rate, wins, losses)}, overall rate).
     """
     graded = picks[picks['outcome'].isin(['W', 'L'])]
@@ -218,3 +226,49 @@ def market_win_rates(picks, prior_games=PRIOR_GAMES, markets=None):
         rate = None if overall is None else (wins + prior_games * overall) / (wins + losses + prior_games)
         rates[market] = (rate, wins, losses)
     return rates, overall
+
+
+def line_group(line):
+    """The LINE_GROUPS label a prop line falls in: '0.5', '1.5-2.5' or '3.5+'."""
+    for label, top in LINE_GROUPS:
+        if float(line) <= top:
+            return label
+    return LINE_GROUPS[-1][0]
+
+
+def line_win_rates(picks, prior_games=PRIOR_GAMES, markets=None):
+    """Backtest win rate of a rule's picks per market and line group (LINE_GROUPS), behind Hist. Win % and Bet At.
+
+    A line group's rate is its picks' rate over all the rule's markets (the rule's overall rate when it has fewer than
+    MIN_LINE_GROUP_PICKS graded picks), and a market's rate at a line group borrows `prior_games` picks' worth of it
+    (empirical Bayes, as market_win_rates borrows the overall rate), so a market with few picks at a line does not set
+    a price on its own.  Picks go by the line they were graded at (`bet_line`).  `markets` defaults to the under rule's.
+    Returns ({(market, group): (rate, wins, losses)}, {group: rate}, overall rate); a market with no picks at a line
+    group is left out and takes the group's rate (win_rate_at).
+    """
+    graded = picks[picks['outcome'].isin(['W', 'L'])]
+    graded = graded.assign(group=[line_group(line) for line in graded['bet_line']])
+    wins_all = int((graded['outcome'] == 'W').sum())
+    overall = wins_all / len(graded) if len(graded) else None
+    group_rates = {}
+    for label, _ in LINE_GROUPS:
+        sub = graded[graded['group'] == label]
+        group_rates[label] = float((sub['outcome'] == 'W').mean()) if len(sub) >= MIN_LINE_GROUP_PICKS else overall
+    rates = {}
+    for market in markets or PICK_MARKETS or graded['market'].unique():
+        for label, _ in LINE_GROUPS:
+            sub = graded[(graded['market'] == market) & (graded['group'] == label)]
+            if sub.empty:
+                continue
+            wins, losses = int((sub['outcome'] == 'W').sum()), int((sub['outcome'] == 'L').sum())
+            prior = group_rates[label]
+            rate = None if prior is None else (wins + prior_games * prior) / (wins + losses + prior_games)
+            rates[(market, label)] = (rate, wins, losses)
+    return rates, group_rates, overall
+
+
+def win_rate_at(rates, group_rates, overall, market, line):
+    """Hist. Win % of a pick in `market` at `line`, from line_win_rates' tables."""
+    group = line_group(line)
+    found = rates.get((market, group))
+    return found[0] if found else group_rates.get(group, overall)

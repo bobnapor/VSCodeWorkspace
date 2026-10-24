@@ -62,6 +62,9 @@ RULE_LINES = (
     "little without prices); the under rule also leaves out pass attempts and completions (no information there).",
     f"Bet At: the worst DraftKings price at which a pick still returns {ps.MIN_EDGE:.0%} on average at its Hist. Win %. "
     "The free ESPN feed has DraftKings' lines but not its prices, so check the price in the app.",
+    "Hist. Win % goes by market and line (0.5, 1.5-2.5, 3.5+): low lines win far more often, and books price them "
+    "accordingly (receptions overs won about 70% at lines of 2.5 or less, 55% at 3.5 and up), so one rate per market "
+    "would set the wrong price both ways.  The record by market and line is below.",
     "Forecasts: one gradient-boosted model per market on nflverse box scores, game lines, injury reports and starting "
     f"QBs, refitted each season on the {pm.TRAIN_SEASONS} seasons before it; the chances come from what happened after "
     f"similar out-of-sample forecasts in the previous {pm.DIST_SEASONS} seasons.",
@@ -322,10 +325,15 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
             v['dists'] = pm.distributions(forecasts, season)
             scored_history = ps.score_history(line_history, forecasts, rule['graded_at'])
             history = rule['picks'](scored_history.merge(history_missed, on=['gsis_id', 'game_id'], how='left'))
-            v['rates'], v['overall'] = ps.market_win_rates(history, markets=rule['markets'])
+            v['rates'], v['group_rates'], v['overall'] = ps.line_win_rates(history, markets=rule['markets'])
+            by_market = {}
+            for (market, _), (_, wins, losses) in v['rates'].items():
+                won, lost = by_market.get(market, (0, 0))
+                by_market[market] = (won + wins, lost + losses)
             logging.info(f"Backtest record of the {side.lower()} rule ({rule['label']}, 2024 on): " + ', '.join(
-                f"{m} {w}-{l}" for m, (_, w, l) in v['rates'].items())
-                + (f"; {v['overall']:.1%} overall" if v['overall'] else ''))
+                f"{m} {w}-{l}" for m, (w, l) in by_market.items())
+                + (f"; {v['overall']:.1%} overall" if v['overall'] else '')
+                + "; by line: " + ', '.join(f"{g} {r:.1%}" for g, r in v['group_rates'].items() if r is not None))
             if side == 'Over':
                 v['late_rate'], late_n = ps.never_moved_rate(history)
                 if v['late_rate'] is not None:
@@ -360,7 +368,7 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                     if side == 'Over' and ps.returner_skip(missed, week):
                         returners.append((r, missed, week_fc[(r.gsis_id, r.game_id, r.market)][1]['team']))
                         continue
-                    hist, note = v['rates'].get(r.market, (v['overall'], 0, 0))[0], None
+                    hist, note = ps.win_rate_at(v['rates'], v['group_rates'], v['overall'], r.market, r.line), None
                     if side == 'Over' and hours_left[r.game_id] < ps.OVER_LATE_HOURS and v.get('late_rate') is not None:
                         hist = v['late_rate']
                         note = (f"LATE: still at its opener {hours_left[r.game_id]:.0f}h before kickoff, so likely a line "
@@ -453,8 +461,10 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                 else:
                     under_empty = f"None yet: {text}."
             note = ' '.join(notes) or None
-            rule_records = [(f"Record of the {side.lower()} rule ({RULES[side]['label']}, 2024 on), by market",
-                             variants[side]['rates'], variants[side]['overall']) for side in sides]
+            rule_records = [(f"Record of the {side.lower()} rule ({RULES[side]['label']}, 2024 on), by market and line",
+                             {f"{market}, line {group}": record
+                              for (market, group), record in variants[side]['rates'].items()},
+                             variants[side]['overall']) for side in sides]
             props_sheet.write_workbook(path, season, week, picks, records, rule_records, RULE_LINES, EVIDENCE,
                                        skipped=skipped, note=note, sides=sides, under_empty=under_empty)
             logging.info(f"Props workbook updated: {path}")
