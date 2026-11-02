@@ -6,7 +6,7 @@ Personal Python projects, one folder per area. Scripts import their siblings by 
 |---|---|
 | [nfl/](nfl/) | NFL point-spread picks. **See [nfl/README.md](nfl/README.md) for the full current state, evidence and handoff notes.** `nfl_prod_projections.py` runs the weekly projections and picks; `nfl_model.py` and `nfl_signal.py` are the models, `nfl_reasons.py` explains each lean and `nfl_sheet.py` writes the workbook. The `nflpicks*` scripts are older (broken) versions kept for reference. |
 | [mlb/](mlb/) | MLB picks, backtest and lines UI. |
-| [nba/](nba/) | NBA picks. |
+| [nba/](nba/) | NBA research (November 2026), separate from the NFL code: ESPN's box scores and line archive, team ratings, spread, total and player-prop models, and pre-registered tests. **None beat the market at real prices**, so there is no NBA betting run; `nba_prod_games.py` tracks the season's spread and total leans (not bets). See [nba/README.md](nba/README.md). `nbapicks.py` is an older script kept for reference. |
 | [college/](college/) | College football and basketball picks. |
 | [fantasy/](fantasy/) | Fantasy football drafting and analytics scripts. |
 | [fantasy_football_web/](fantasy_football_web/) | Flask site for fantasy league history and analytics (see its own README). |
