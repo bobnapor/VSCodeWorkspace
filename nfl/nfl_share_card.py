@@ -24,6 +24,10 @@ out.  The week's first card says the week's dates; later ones say "New picks" an
 is made.  Until last week's final game is in nflverse's stats (late morning the day after Monday night's game), the
 new week's spread, teaser and prop picks wait for a later card, since they were made without that game.
 
+Every run then rebuilds the card record, NFL\\<season>_nfl_card_record.xlsx (nfl_card_record.py): every pick the cards
+have shown, graded at the card's line, with a Bet? column to set to No for a pick you did not bet, which takes it out
+of the record.
+
 The graphic is 1080 px wide: 1080 x 1350 (4:5, the tallest Instagram feed post, and fine for texts, X and Facebook)
 when the picks fit, shrinking the type a little first; otherwise taller.  The card shows everything shared (no "more"
 line): it is saved in NFL\\Cards as '<season> week <N> - <day>.png', with the same picks as plain text, ready to paste
@@ -50,6 +54,7 @@ import openpyxl
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
+import nfl_card_record as card_record
 import nfl_prop_signal as prop_signal
 import nfl_props_sheet as props_sheet
 import nfl_sheet as sheet
@@ -928,6 +933,10 @@ def main(**options):
     if card_path:
         print(f'Share card saved: {card_path}')
         print(f'Pick list saved: {list_path}')
+    record = card_record.update()
+    if record:
+        print(record[1])
+        print(f'Card record updated: {record[0]}')
     return 0
 
 
