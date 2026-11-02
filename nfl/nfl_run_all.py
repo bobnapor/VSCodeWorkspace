@@ -11,7 +11,8 @@ Each flow runs as its own Python process, exactly as if it were started by hand 
 on): nothing is imported or shared between them, each keeps its own settings (the Configuration block at the bottom of
 each script), logging and output files, and a failure in one does not stop the others.  They run one after another
 rather than side by side because two of them refresh the same nflverse files in data_cache.  The last step,
-nfl_share_card.py, only reads what the flows wrote (it changes none of their logic or files).
+nfl_share_card.py, only reads what the flows wrote (it changes none of their logic or files), and then rebuilds the card
+record (nfl_card_record.py: every pick the cards showed, graded, with a Bet? column for the picks you did not bet).
 
 Options, not needed day to day:
     python nfl_run_all.py projections wind    only the flows named (projections, props, wind), then the card
@@ -20,7 +21,7 @@ Options, not needed day to day:
 
 Everything the flows print is shown as it happens and saved to NFL\\logs\\nfl_run_all_<timestamp>.txt.  A summary at the
 end lists each flow's result and time, any errors worth a look, and the files it updated.  Before starting, it checks
-that none of the files the flows write is open in Excel (an open workbook cannot be saved).
+that none of the files the steps write is open in Excel (an open workbook cannot be saved).
 """
 
 import os
@@ -37,12 +38,14 @@ STEPS = (
     ('projections', 'nfl_prod_projections.py', 'spread projections, picks, favorite picks and teaser legs', '{season}_nfl_projections.xlsx'),
     ('props', 'nfl_prod_props.py', 'player prop picks', '{season}_nfl_props.xlsx'),
     ('wind', 'nfl_wind_unders.py', 'weather check for totals (wind and rain unders)', '{season}_wind_unders.csv'),
-    ('card', 'nfl_share_card.py', "the day's shareable graphic and text list of new picks", None),
+    ('card', 'nfl_share_card.py', "the day's shareable graphic and text list of new picks, and the card record",
+     '{season}_nfl_card_record.xlsx'),
 )
 CARD, NO_CARD = 'card', 'nocard'
 OUTPUT_LINES = (re.compile(r'Projections spreadsheet updated: (.+?) \('), re.compile(r'Props workbook updated: (.+)$'),
                 re.compile(r'Season log: (.+)$'), re.compile(r'Logging to file: (.+)$'), re.compile(r'Share card saved: (.+)$'),
-                re.compile(r'Pick list saved: (.+)$'), re.compile(r'^((?:No new picks|No picks yet|Held back) .+)$'))
+                re.compile(r'Pick list saved: (.+)$'), re.compile(r'^((?:No new picks|No picks yet|Held back) .+)$'),
+                re.compile(r'^(Card record \(picks you bet\): .+)$'), re.compile(r'Card record updated: (.+)$'))
 PROBLEM_LINES = re.compile(r' - ERROR - |Traceback \(most recent call last\)|^\w*Error: |Could not ')
 NEXT_RUN = 'Next run: tomorrow, around 10 AM Eastern (the daily schedule is at the top of nfl\\README.md).'
 
