@@ -156,6 +156,11 @@ def closing_lines(seasons):
                'home_moneyline', 'away_moneyline', 'open_home_spread', 'open_total']
     for column in numeric:
         odds[column] = pd.to_numeric(odds[column], errors='coerce')
+    # an American price is -100 or below, or +100 or above: anything between (0 is a placeholder some books, Bovada and
+    # Wynn above all, post for a moneyline off the board) is no price
+    for column in ('home_spread_odds', 'away_spread_odds', 'over_odds', 'under_odds', 'home_moneyline',
+                   'away_moneyline'):
+        odds.loc[odds[column].abs() < 100, column] = None
     odds['provider_id'] = pd.to_numeric(odds['provider_id'], errors='coerce').astype('Int64')
     odds.loc[odds['home_spread'].abs() > SPREAD_LIMIT, 'home_spread'] = None
     odds.loc[~odds['total'].between(*TOTAL_RANGE), 'total'] = None
