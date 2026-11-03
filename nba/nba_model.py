@@ -59,10 +59,11 @@ class RidgeModel:
         return pd.Series(self.ridge.coef_, index=self.features).sort_values(key=np.abs, ascending=False)
 
 
-def scored(table, kind, alpha, first_test, last_test, train_from=FIRST_LINES_SEASON):
+def scored(table, kind, alpha, first_test, last_test, train_from=FIRST_LINES_SEASON, features=None):
     """Walk-forward predictions for `kind`: 'cover' or 'over' (Model B: the correction, needing closing lines to train)
-    or 'margin' or 'points' (Model A).  Returns the scored rows with a 'pred' column."""
-    features = SPREAD_FEATURES if kind in ('cover', 'margin') else TOTAL_FEATURES
+    or 'margin' or 'points' (Model A).  `features` replaces the default feature list.  Returns the scored rows with a
+    'pred' column."""
+    features = features or (SPREAD_FEATURES if kind in ('cover', 'margin') else TOTAL_FEATURES)
     table = add_sums(table)
 
     def fit_predict(train, test):

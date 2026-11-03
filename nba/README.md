@@ -9,6 +9,7 @@ A separate project from the NFL suite (`../nfl`): its own code (nothing imported
 - **Spreads and totals** (section 3): on the untouched 2020-21 to 2025-26 seasons the correction model's pre-registered rules went **52.4%** on spreads (2,392-2,174) and **52.5%** on overs (1,033-935), against 52.38% break-even at -110.
 - **Player props** (section 4): at the line every rule looked strong (56-73% won), but **at ESPN BET's own prices every one lost money** (-1.1% to -4.4% a bet). The book moved prices instead of lines, so what looked like an edge was already priced in. Value bets (only where the model's chance beats the price's implied chance) were negative for overs and between -1.2% and +1.7% a bet for unders: the best of 20 combinations scanned, not rising with the edge, and at a softer book than DraftKings. The props' untouched test seasons were left unspent.
 - **The game-lines tracker** (section 5) is kept for occasional use: today's DraftKings spreads and totals with the model's leans, graded through the season. **Tracked, not bet.**
+- **How sharps beat NBA lines, tested** (section 8): line shopping, spread-against-moneyline pricing, the favorite-longshot bias, early-season totals, referees, beating the opener, following the money and fading blowouts, each a rule fixed in advance and judged at real prices: **none passes.** Two point the right way in both periods but are far from significant: the model's lean at the opening line (+1-2% a bet) and money well ahead of the tickets (about 60% of 77 bets).
 
 ## 1. Data (all free; `nba_data.py`, `nba_lines.py`, `nba_prop_lines.py`, `nba_injuries.py`)
 
@@ -17,7 +18,8 @@ A separate project from the NFL suite (`../nfl`): its own code (nothing imported
 | sportsdataverse's ESPN NBA releases (`espn_nba_schedules`, `espn_nba_team_boxscores`, `espn_nba_player_boxscores`) | Every game since 1993-94: tip-off, venue, neutral site, scores; one row per team-game (shooting, rebounds, assists, turnovers, steals, blocks, fouls, paint and fast-break points); one row per player-game (minutes, box score, plus-minus, starter, did not play and why). Refreshed every morning about 7:40 AM Eastern; the latest season is downloaded again when asked (`refresh`), older ones come from the cache. CSV files, as this 32-bit Python has no parquet reader. |
 | ESPN's odds archive (`sports.core.api.espn.com/.../events/{id}/competitions/{id}/odds`) | Every game's spread and total from several books since 2013-14 (5Dimes, BetOnline and Bovada early on; Caesars, DraftKings and others later), with prices and moneylines, and since 2023-24 the opening lines. `closing_lines` takes the median across sportsbooks, leaving out ESPN's aggregators and projection sites (numberfire posts zeros as placeholders; ESPN's own "consensus" sometimes has the spread's sign flipped), in-game "Live Odds" books and impossible values; the "Opening" provider (through 2016-17) is the opening line. Closing spreads miss the final margin by 9.1-10.9 points a season and totals by 13.4-14.9, and home teams covered 48-51%, so the lines are sound. Fill the cache with `python nba_lines.py history` (about 13 seconds a season). |
 | ESPN's prop feed (`.../odds/{provider}/propBets`) | Player prop lines, current and opening: ESPN BET (provider 58) from late December 2023 to the end of November 2025, DraftKings (provider 100) from October 2026, nothing in between (the switch of books); about 100 player lines a game. ESPN BET's items say which side they are, with each side's price now and at the open; DraftKings' do not, and their order is not reliable (the over comes first about three times in four), so DraftKings lines can be graded only at the line. ESPN BET's lines were last updated after the games (settlement), so an ESPN BET line counts as the closing line, as in the NFL suite. `python nba_prop_lines.py history` fills the cache (`props_espn_<season>_v2.csv`, a few minutes a season). |
-| Action Network's scoreboard (`api.actionnetwork.com/web/v2/scoreboard/nba`) | The day's DraftKings spreads and totals with their prices, the consensus, the opener and the betting splits (`nba_lines.day_lines`; Action Network keeps NBA lines back to late 2023). |
+| Action Network's scoreboard (`api.actionnetwork.com/web/v2/scoreboard/nba`) | The day's DraftKings spreads and totals with their prices, the consensus, the opener and the betting splits (`nba_lines.day_lines`). `nba_market.py` keeps every game's closing lines at 17 books (DraftKings, FanDuel, BetRivers, Caesars, bet365, Parx, Unibet, Bally Bet, Sports Interaction; no sharp market-maker such as Pinnacle or Circa) with the consensus splits, from 2024-25 on (2023-24 has the consensus line only): `python nba_market.py history`, about half a second a day. |
+| sportsdataverse's `espn_nba_officials` | The referees of every game since 2001-02 (`nba_data.load_officials`). |
 | ESPN's injury list (`site.api.espn.com/.../nba/injuries`) | Who is out tonight (Out, suspended, or ESPN's fantasy status OUT; the player's id is in his profile link); Day-To-Day players count as playing. |
 
 ESPN's season numbers are the year a season ends (2027 is 2026-27). Teams are keyed by ESPN's id, which stays with a franchise through moves and renames; the 30 franchises are ids 1-30 (All-Star and exhibition teams have others).
@@ -47,7 +49,7 @@ For occasional use, by hand: `python nba_prod_games.py` from this folder (the pa
 
 ## 6. Files (`nba/`)
 
-`nba_common.py` (the NBA folder, season numbering), `nba_data.py`, `nba_lines.py`, `nba_prop_lines.py`, `nba_injuries.py` (data), `nba_lab.py` (the research table and walk-forward harness), `nba_model.py` (Models A and B), `nba_prop_model.py` (prop forecasts and outcome distributions), `nba_research_validate.py` and `nba_research_props.py` (the pre-registered tests, with their results in their docstrings), `nba_prod_games.py` (the tracker), `requirements.txt`. `nbapicks.py` is an older script kept for reference.
+`nba_common.py` (the NBA folder, season numbering), `nba_data.py`, `nba_lines.py`, `nba_market.py`, `nba_prop_lines.py`, `nba_injuries.py` (data), `nba_lab.py` (the research table and walk-forward harness), `nba_model.py` (Models A and B), `nba_prop_model.py` (prop forecasts and outcome distributions), `nba_research_validate.py`, `nba_research_props.py` and `nba_research_sharp.py` (the pre-registered tests, with their results in their docstrings), `nba_prod_games.py` (the tracker), `requirements.txt`. `nbapicks.py` is an older script kept for reference.
 
 ## 7. If this is picked up again
 
@@ -55,3 +57,22 @@ Ideas not tried, each needing its own pre-registered test (the props' untouched 
 - **DraftKings' prices by side** from another source, so value bets can be checked at the book actually used.
 - **Timing:** a snapshot log of lines through the day would show whether any lean moves the line (closing-line value), which the archive cannot (it keeps the open and the close only).
 - **Narrower markets:** first-half lines, team totals, or props in the minutes right after injury news, where books lag; this data has no timestamps fine enough to test them.
+
+## 8. How sharps beat NBA lines, tested (`nba_research_sharp.py`, November 2, 2026)
+
+Professional NBA bettors mostly do not beat closing lines with public statistics; their edges come from timing (openers), market structure (shopping, stale books, related markets priced inconsistently) and niche information (referees, injury news, where the money goes). Each idea free data can test was written down as one rule, fixed in advance from its mechanism, and judged at the prices actually offered in an early and a later period; passing needed a profit in both and z >= 2 in the later. **None passed.** Prices between -100 and +100 are placeholders (5% of the early archive's moneylines were 0) and were dropped first; `nba_lines.closing_lines` drops them too.
+
+| Rule | Early | Late |
+|---|---|---|
+| H1 a book 1+ point off the median spread (1.5+ total), bet at its line and price | +0.7% / +2.0% a bet | -0.9% / -0.4% |
+| H1b DraftKings 1+ off the other books at the close | 29 bets, -5.0% | 67 bets, -16.6% |
+| H2 the moneyline (H2a) or spread (H2b) the other market makes cheap, 3+ points of win chance apart | +2.6% / -7.4% | -2.4% / -4.1% |
+| H3 favorites at -400 or shorter / underdogs at +300 or longer | -3.3% / -4.7% | -4.4% / -6.4% |
+| H4 overs in a season's first 21 days | -4.7% | -7.3% |
+| H5 referee crews' over tendency (+-1 point) | -1.4% | -1.8% |
+| H6 the model (no injury news) at the opening spread / total | **+1.1%** / -4.9% | **+1.8%** / +3.3% |
+| H7 reverse line movement, spreads / totals | -2.6% / -2.2% | +2.0% / +0.4% |
+| H7b money 15+ points ahead of the tickets | **+18.3%** (33 bets) | **+13.0%** (44 bets) |
+| H8 fade a 15+ point cover, back a 15+ point miss | -5.3% | -2.9% |
+
+What it says: books charge for their outlying numbers, so at the close there is no free lunch in shopping alone, though the best of 12 other books beats DraftKings' spread by about 0.4 points on average; moneylines and spreads agree; totals do not lag early in a season; referees and blowouts are priced. The two that point the right way in both periods are the sharps' own: betting the model's side early (it leans with the line's later move, r = +0.05) and following big money. Both are far from significant, the first at an assumed -110, the second on 77 bets; tracking them forward with real prices (a snapshot of every book's lines and splits through the day) is the way to find out.

@@ -22,7 +22,8 @@ from nba_common import CACHE_DIR
 BASE_URL = 'https://github.com/sportsdataverse/sportsdataverse-data/releases/download'
 FILES = {'schedule': ('espn_nba_schedules', 'nba_schedule_{season}.csv'),
          'team_box': ('espn_nba_team_boxscores', 'team_box_{season}.csv'),
-         'player_box': ('espn_nba_player_boxscores', 'player_box_{season}.csv')}
+         'player_box': ('espn_nba_player_boxscores', 'player_box_{season}.csv'),
+         'officials': ('espn_nba_officials', 'officials_{season}.csv')}
 SCHEDULE_COLUMNS = ('game_id', 'season', 'season_type', 'start_date', 'game_date', 'neutral_site', 'notes_headline',
                     'type_abbreviation', 'venue_id', 'venue_full_name', 'venue_address_city', 'venue_address_state',
                     'status_type_completed', 'status_type_name', 'home_id', 'home_abbreviation', 'home_display_name',
@@ -103,3 +104,8 @@ def load_team_box(seasons, refresh=False):
 def load_player_box(seasons, refresh=False, columns=PLAYER_BOX_COLUMNS):
     """One row per player per game for `seasons` (only `columns`, to keep memory down)."""
     return _load('player_box', seasons, columns, refresh)
+
+
+def load_officials(seasons, refresh=False):
+    """The referees of every game of `seasons` (usually three; the crew chief is official_order 1)."""
+    return _load('officials', seasons, ('season', 'game_id', 'official_full_name', 'official_order'), refresh)
