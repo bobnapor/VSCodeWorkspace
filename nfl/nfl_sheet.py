@@ -3,8 +3,7 @@
 The workbook has three tabs, rebuilt from scratch every run after the games already in it are read back (by header
 text), so nothing typed in is lost and older layouts convert on their own:
   This Week   what to bet now: the season scoreboard, this week's underdog picks and favorite picks with the model's
-              reasons, the teaser legs and every game of the week.  Its cells point into the Season Log, so an edit
-              there shows up here.
+              reasons, and every game of the week.  Its cells point into the Season Log, so an edit there shows up here.
   Season Log  one row per game: the running record and the place to type spreads, final margins and notes (yellow).
               Detail columns are grouped at the right; click the + above them to show them.
   Model Info  the editable settings, the backtest tables behind Hist. Win %, and how to read the workbook.
@@ -24,10 +23,6 @@ import requests
 
 # Spreads that sit exactly on a key number (used by the research scripts; the pick rule does not depend on them)
 KEY_LINES = (3.0, 6.0, 7.0, 10.0, 14.0)
-# Wong teaser legs (see nfl_signal.py): underdogs of +1.5/+2.5 and favorites of -7.5/-8.5, teased 6 points
-TEASER_DOG_LINES = (1.5, 2.5)
-TEASER_FAV_LINES = (7.5, 8.5)
-TEASER_POINTS = 6
 # Favorite picks (see nfl_signal.py): night games, kickoff at this hour Eastern or later
 NIGHT_KICKOFF_HOUR = 19
 # The QB skip (see nfl_signal.py and nfl_qb_swing.py): no underdog pick when its quarterback swing is this or worse
@@ -39,9 +34,9 @@ SHEET_THIS_WEEK, SHEET_LOG, SHEET_INFO = 'This Week', 'Season Log', 'Model Info'
 # Season Log columns: what you look at first, then results, notes and reasons, then the detail columns (grouped, collapsed)
 LOG_LAYOUT = (
     ('week', 'Week'), ('away', 'Away'), ('home', 'Home'), ('spread', 'Home Spread'),
-    ('pick', 'Pick'), ('fav_pick', 'Favorite Pick'), ('teaser', 'Teaser Leg'), ('dog_correction', 'Lean to Underdog (pts)'),
+    ('pick', 'Pick'), ('fav_pick', 'Favorite Pick'), ('dog_correction', 'Lean to Underdog (pts)'),
     ('hit_rate', 'Hist. Win %'), ('actual', 'Final Margin (Home)'), ('result', 'Pick Result'), ('fav_result', 'Fav Pick Result'),
-    ('teaser_result', 'Teaser Result'), ('clv', 'Line vs Close'), ('qb_flag', 'QB Note'), ('notes', 'Notes'), ('reason', 'Why the Model Leans'),
+    ('clv', 'Line vs Close'), ('qb_flag', 'QB Note'), ('notes', 'Notes'), ('reason', 'Why the Model Leans'),
     ('fair_line', 'Fair Line (Home)'), ('fair_vs_spread', 'Fair Line vs Spread'), ('side', 'Model Side'),
     ('covering', 'Covering Team'), ('side_result', 'Model Side Result'), ('close', 'Closing Spread (Home)'),
     ('correction', 'Model Correction (Home)'), ('kickoff', 'Kickoff (ET)'), ('fav_clv', 'Fav Line vs Close'), ('year', 'Year'),
@@ -62,8 +57,8 @@ COL = {key: index for index, (key, _) in enumerate(LOG_LAYOUT, start=1)}
 LETTER = {key: _column_letter(index) for key, index in COL.items()}
 LAST_VISIBLE = COL['reason']
 LAST_COLUMN = len(LOG_LAYOUT)
-LOG_WIDTHS = {'week': 6, 'away': 20, 'home': 20, 'spread': 8, 'pick': 15, 'fav_pick': 15, 'teaser': 15, 'dog_correction': 9,
-              'hit_rate': 8, 'actual': 9, 'result': 8, 'fav_result': 8, 'teaser_result': 8, 'clv': 8, 'qb_flag': 30, 'notes': 24,
+LOG_WIDTHS = {'week': 6, 'away': 20, 'home': 20, 'spread': 8, 'pick': 15, 'fav_pick': 15, 'dog_correction': 9,
+              'hit_rate': 8, 'actual': 9, 'result': 8, 'fav_result': 8, 'clv': 8, 'qb_flag': 30, 'notes': 24,
               'reason': 90, 'fair_line': 9, 'fair_vs_spread': 9, 'side': 12, 'covering': 12, 'side_result': 9, 'close': 9,
               'correction': 10, 'kickoff': 9, 'fav_clv': 9, 'year': 6, 'line_written': 9, 'home_swing': 9, 'away_swing': 9}
 # The reason shows its headline (first line) only, so every game stays one row high; the full text is in the cell
@@ -80,7 +75,7 @@ READ_HEADERS = {**{header: key for key, header in LOG_LAYOUT}, **LEGACY_HEADERS}
 REQUIRED_FIELDS = ('week', 'year', 'home', 'away', 'spread', 'actual', 'notes')
 MANUAL_INPUT_FIELDS = ('spread', 'actual', 'notes')
 
-# Model Info: settings in column B, then the hit-rate table, the teaser table and the favorite-pick table below them
+# Model Info: settings in column B, then the hit-rate table and the favorite-pick table below them
 INFO_SETTINGS = {
     'threshold': ('Minimum lean to underdog (pts)', 0.0, 5),
     'first_week': ('First pick week', 5, 6),
@@ -93,17 +88,15 @@ LEGACY_HIT_TABLE_HEADER = 'Correction toward underdog from'
 HIT_TABLE_FIRST_ROW, HIT_TABLE_ROWS = 13, 5
 HIT_TABLE_NOTES = {-99: 'Model leans the favorite (see Favorite picks)', 0: 'Underdog, lean under 0.25', 0.25: 'Underdog, lean 0.25-0.5',
                    0.5: 'Underdog, lean 0.5-1', 1: 'Underdog, lean 1 or more'}
-TEASER_HEADERS = ('Teaser leg (weeks 5-16)', 'Win % since 1999', 'Win % since 2018')
-TEASER_TABLE_FIRST_ROW = 22
 FAV_TABLE_HEADERS = ('Favorite picks, night games (weeks 5-16)', 'Win %', 'Games')
-FAV_TABLE_FIRST_ROW, FAV_TABLE_ROWS = 28, 4
+FAV_TABLE_FIRST_ROW, FAV_TABLE_ROWS = 22, 4
 FORMAT_LAST_ROW = 1000
 
 # Colors
 NAVY, WHITE, GRAY_TEXT = '1F4E78', 'FFFFFF', '595959'
 MANUAL_HEADER, MANUAL_CELL, DETAIL_HEADER = 'FFD966', 'FFF8E1', '7F7F7F'
 WEEK_BAND, CARD_FILL, SECTION_FILL = 'EEF3F8', 'F2F2F2', 'DDEBF7'
-PICK_FILL, FAV_FILL, TEASER_FILL, WIN_FILL, LOSS_FILL = 'BDD7EE', 'E4DFEC', 'FCE4D6', 'C6EFCE', 'FFC7CE'
+PICK_FILL, FAV_FILL, WIN_FILL, LOSS_FILL = 'BDD7EE', 'E4DFEC', 'C6EFCE', 'FFC7CE'
 SIGNED_GENERAL = '+General;-General;0'
 
 
@@ -405,15 +398,6 @@ def _hit_rate_table_from(wb):
     return []
 
 
-def _teaser_table_from(wb):
-    """The teaser-leg table the workbook already holds, [(label, rate since 1999, rate since 2018)]."""
-    for ws, cell in _cells(wb):
-        if cell.value == TEASER_HEADERS[0]:
-            rows = [tuple(ws.cell(r, cell.column + i).value for i in range(3)) for r in (cell.row + 1, cell.row + 2)]
-            return [r for r in rows if isinstance(r[1], (int, float))]
-    return []
-
-
 def _favorite_table_from(wb):
     """The favorite-pick table the workbook already holds, [(era, rate, games)]."""
     for ws, cell in _cells(wb):
@@ -492,19 +476,6 @@ def _is_favorite_pick(record, settings):
             and _night_game(record.get('kickoff')))
 
 
-def _teaser_leg(record, settings):
-    """(team nickname, teased spread text, 'Underdog'/'Favorite') for a Wong teaser leg, or None."""
-    spread = record['spread']
-    if not _number(spread) or not _in_pick_weeks(record, settings):
-        return None
-    line, home_is_dog = abs(spread), spread > 0
-    if line in TEASER_DOG_LINES:
-        return _nick(record['home'] if home_is_dog else record['away']), f'+{line + TEASER_POINTS:g}', 'Underdog'
-    if line in TEASER_FAV_LINES:
-        return _nick(record['away'] if home_is_dog else record['home']), f'-{line - TEASER_POINTS:g}', 'Favorite'
-    return None
-
-
 def _split_reason(text):
     """(headline without its 'Titans by 0.7: ' lead, detail lines) of a reason from nfl_reasons; ('', []) without one."""
     if not text:
@@ -532,7 +503,7 @@ def _lean_text(record):
 
 # ---------------------------------------------------------------- the three tabs
 
-def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favorite_table=()):
+def _write_info(ws, settings, hit_rate_table, through_season, favorite_table=()):
     """Model Info: settings (yellow, editable), the backtest tables and how to read the workbook."""
     from openpyxl.styles import Alignment, Font
 
@@ -579,15 +550,6 @@ def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favo
         ws.cell(r, 4, HIT_TABLE_NOTES.get(edge, ''))
     ws.cell(HIT_TABLE_FIRST_ROW + HIT_TABLE_ROWS, 1, 'Break-even at -110 odds is 52.4%. A lean of -99 means the model favors the favorite.').font = Font(italic=True, color=GRAY_TEXT)
 
-    section(TEASER_TABLE_FIRST_ROW - 2, 'TEASER LEGS  (6 points through 3 and 7; pair two legs in one teaser)')
-    header(TEASER_TABLE_FIRST_ROW - 1, TEASER_HEADERS)
-    for r, (label, all_rate, recent_rate) in enumerate(teaser_table, start=TEASER_TABLE_FIRST_ROW):
-        ws.cell(r, 1, label)
-        for col, value in ((2, all_rate), (3, recent_rate)):
-            ws.cell(r, col, value).number_format = '0.0%'
-            ws.cell(r, col).alignment = Alignment(horizontal='center')
-    ws.cell(TEASER_TABLE_FIRST_ROW + 2, 1, 'A 2-team teaser needs 72.4% per leg at -110 and 73.9% at -120.').font = Font(italic=True, color=GRAY_TEXT)
-
     section(FAV_TABLE_FIRST_ROW - 2, 'FAVORITE PICKS  (night games where the model leans to the favorite by the minimum or more)')
     header(FAV_TABLE_FIRST_ROW - 1, FAV_TABLE_HEADERS)
     for r, (era, rate, games) in enumerate(list(favorite_table)[:FAV_TABLE_ROWS], start=FAV_TABLE_FIRST_ROW):
@@ -601,7 +563,7 @@ def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favo
     guide_row = FAV_TABLE_FIRST_ROW + FAV_TABLE_ROWS + 2
     section(guide_row, 'HOW TO READ THIS WORKBOOK')
     guide = (
-        'This Week: the season scoreboard, then this week\'s picks with the reason for each, the teaser legs and every game.',
+        'This Week: the season scoreboard, then this week\'s picks with the reason for each, and every game.',
         'Pick: the underdog to bet, at the spread shown. The model leans to it; about 55% of these covered in every era tested.',
         '     No pick when the underdog\'s quarterback is a downgrade: its QB swing (the projected starter\'s rating minus the',
         '     quarterbacks behind the team\'s stats, Home/Away QB Swing at the right) is -0.05 or worse; such picks covered 52%.',
@@ -612,7 +574,6 @@ def _write_info(ws, settings, hit_rate_table, teaser_table, through_season, favo
         '     main rating with both teams\' numbers (season-to-date, adjusted for opponents and recency). "(worse)": the team is',
         '     worse there and it still helps them, because the line has historically overrated that gap. "Steady" effects have',
         '     pointed the same way across the training seasons; effects that flipped are weaker evidence.',
-        'Teaser Leg: a published 6-point teaser leg (about 75% of legs won); pair two of them in one teaser.',
         'Season Log: yellow columns are typed by hand.  Home Spread fills in from DraftKings and follows the line until',
         '     kickoff; a spread you type yourself (the line you bet) is kept, and so are final margins and notes.',
         '     Why the Model Leans shows the headline; select the cell to read the whole reason in the formula bar.',
@@ -648,8 +609,8 @@ def _write_log(ws, records, settings):
         ws.column_dimensions[get_column_letter(COL[key])].width = LOG_WIDTHS[key]
     ws.row_dimensions[1].height = 32
 
-    centered = {'week', 'spread', 'pick', 'fav_pick', 'teaser', 'dog_correction', 'hit_rate', 'actual', 'result', 'fav_result',
-                'teaser_result', 'clv', 'fair_line', 'fair_vs_spread', 'side', 'covering', 'side_result', 'close', 'correction',
+    centered = {'week', 'spread', 'pick', 'fav_pick', 'dog_correction', 'hit_rate', 'actual', 'result', 'fav_result',
+                'clv', 'fair_line', 'fair_vs_spread', 'side', 'covering', 'side_result', 'close', 'correction',
                 'kickoff', 'fav_clv', 'year', 'line_written', 'home_swing', 'away_swing'}
     formats = {'spread': SIGNED_GENERAL, 'close': SIGNED_GENERAL, 'actual': SIGNED_GENERAL, 'fair_line': '+0.0;-0.0;0.0',
                'fair_vs_spread': '+0.0;-0.0;0.0', 'dog_correction': '+0.0;-0.0;0.0', 'hit_rate': '0%', 'clv': '+0.0;-0.0;0.0',
@@ -697,13 +658,6 @@ def _write_log(ws, records, settings):
             'fav_result': f'=IF({c["fav_pick"]}="","",{c["side_result"]})',
             'fav_clv': f'=IF(OR({c["fav_pick"]}="",{c["close"]}="",{spread}=""),"",IF({spread}<0,{spread}-{c["close"]},{c["close"]}-{spread}))',
         }
-        dog_leg = 'OR(' + ','.join(f'ABS({spread})={v:g}' for v in TEASER_DOG_LINES) + ')'
-        fav_leg = 'OR(' + ','.join(f'ABS({spread})={v:g}' for v in TEASER_FAV_LINES) + ')'
-        values['teaser'] = (f'=IF(OR({spread}="",NOT({in_weeks})),"",IF({dog_leg},IF({spread}>0,{home_name},{away_name})&" +"&(ABS({spread})+{TEASER_POINTS}),'
-                            f'IF({fav_leg},IF({spread}>0,{away_name},{home_name})&" -"&(ABS({spread})-{TEASER_POINTS}),"")))')
-        home_teased = f'OR(AND({dog_leg},{spread}>0),AND({fav_leg},{spread}<0))'
-        values['teaser_result'] = (f'=IF(OR({c["teaser"]}="",{actual}=""),"",IF({home_teased},IF({actual}+{spread}+{TEASER_POINTS}>0,"Win","Loss"),'
-                                   f'IF({actual}+{spread}<{TEASER_POINTS},"Win","Loss")))')
 
         group = week_group(record)
         first = r == 2 or groups[r - 3] != group
@@ -729,12 +683,12 @@ def _write_log(ws, records, settings):
         ws.row_dimensions[r].height = LOG_ROW_HEIGHT
         row_of[(str(record['week']), str(record['year']), record['home'], record['away'])] = r
 
-    # conditional formatting: picks blue, favorite picks lilac, teaser legs orange, wins green, losses red, line value green/red
+    # conditional formatting: picks blue, favorite picks lilac, wins green, losses red, line value green/red
     last_row = FORMAT_LAST_ROW
-    for key, color in (('pick', PICK_FILL), ('fav_pick', FAV_FILL), ('teaser', TEASER_FILL)):
+    for key, color in (('pick', PICK_FILL), ('fav_pick', FAV_FILL)):
         ws.conditional_formatting.add(f'{LETTER[key]}2:{LETTER[key]}{last_row}',
                                       FormulaRule(formula=[f'LEN(${LETTER[key]}2)>0'], fill=_fill(color)))
-    for key in ('result', 'fav_result', 'teaser_result', 'side_result'):
+    for key in ('result', 'fav_result', 'side_result'):
         for outcome, color in (('Win', WIN_FILL), ('Loss', LOSS_FILL)):
             ws.conditional_formatting.add(f'{LETTER[key]}2:{LETTER[key]}{last_row}',
                                           FormulaRule(formula=[f'${LETTER[key]}2="{outcome}"'], fill=_fill(color)))
@@ -752,9 +706,9 @@ def _write_log(ws, records, settings):
     return row_of
 
 
-def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, favorite_table=()):
-    """This Week: the scoreboard, this week's underdog and favorite picks with reasons, teaser legs and every game, all
-    pointing into the log."""
+def _write_this_week(ws, records, row_of, week, year, settings, favorite_table=()):
+    """This Week: the scoreboard, this week's underdog and favorite picks with reasons and every game, all pointing into
+    the log."""
     from openpyxl.formatting.rule import FormulaRule
     from openpyxl.styles import Alignment, Border, Font, Side
 
@@ -794,8 +748,7 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
     merged(1, f'NFL Picks  -  {title}', Font(size=20, bold=True, color=NAVY), height=34)
     merged(2, f'Updated {datetime.now():%A %B %d, %I:%M %p}.  Straight picks are underdogs the model leans to (about 55% '
               f'against the spread in every era tested); favorite picks are night-game favorites it leans to by '
-              f'{settings["fav_threshold"]}+ points (56-65% in every era, thinner evidence: expect about 55%); teaser legs '
-              f'follow the published 6-point rule (about 75% of legs).',
+              f'{settings["fav_threshold"]}+ points (56-65% in every era, thinner evidence: expect about 55%).',
            Font(italic=True, color=GRAY_TEXT), height=45, wrap=True)
 
     # scoreboard
@@ -812,8 +765,6 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
         ('Picks this season', f'={count("result", "Win")}&"-"&{count("result", "Loss")}&"-"&{count("result", "Push")}', None),
         ('Pick win %', f'=IFERROR({count("result", "Win")}/({count("result", "Win")}+{count("result", "Loss")}),"-")', '0.0%'),
         (last_label, last_week, None),
-        ('Teaser legs', f'={count("teaser_result", "Win")}&"-"&{count("teaser_result", "Loss")}', None),
-        ('Teaser leg win %', f'=IFERROR({count("teaser_result", "Win")}/({count("teaser_result", "Win")}+{count("teaser_result", "Loss")}),"-")', '0.0%'),
         ('Avg line vs close', f'=IFERROR(AVERAGE({span("clv")}),"-")', '+0.00;-0.00;0.00'),
     )
     if previous and settings['first_week'] <= previous <= settings['last_week']:
@@ -920,34 +871,9 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
         row = why(row + 1, record)
 
     row += 1
-    legs = [(r, _teaser_leg(r, settings)) for r in this_week]
-    legs = [(r, leg) for r, leg in legs if leg]
-    merged(row, f'TEASER LEGS ({len(legs)})  -  6-point teaser legs; pair two legs in one teaser', Font(bold=True, size=12, color=WHITE), NAVY, height=22)
-    row += 1
-    header(row, ('Game', 'Teaser leg', 'Leg type', 'Win % since 1999', 'Win % since 2018', 'Result'))
-    row += 1
-    rates = {('Underdog' if str(label).startswith('Underdog') else 'Favorite'): (a, b) for label, a, b in teaser_table}
-    if not legs:
-        merged(row, 'No teaser legs this week.', Font(italic=True, color=GRAY_TEXT))
-        row += 1
-    for record, (team, teased, kind) in legs:
-        r = row_of[(str(record['week']), str(record['year']), record['home'], record['away'])]
-        all_rate, recent_rate = rates.get(kind, (None, None))
-        cells = (f'{_nick(record["away"])} @ {_nick(record["home"])}', ref('teaser', r), kind, all_rate, recent_rate, ref('teaser_result', r))
-        for col, value in enumerate(cells, start=1):
-            cell = ws.cell(row, col, value)
-            cell.alignment = Alignment(horizontal='left' if col == 1 else 'center', vertical='center')
-            cell.border = Border(bottom=thin)
-        ws.cell(row, 2).font = Font(bold=True)
-        ws.cell(row, 2).fill = _fill(TEASER_FILL)
-        for col in (4, 5):
-            ws.cell(row, col).number_format = '0.0%'
-        row += 1
-
-    row += 1
     merged(row, f'EVERY GAME THIS WEEK ({len(this_week)})', Font(bold=True, size=12, color=WHITE), NAVY, height=22)
     row += 1
-    header(row, ('Game', 'Home spread', 'Model leans', 'Pick', 'Teaser leg', 'Pick result'))
+    header(row, ('Game', 'Home spread', 'Model leans', 'Pick', 'Kickoff (ET)', 'Pick result'))
     row += 1
     first_game_row = row
 
@@ -962,7 +888,7 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
                    and _qb_skip(record))
         cells = (f'{_nick(record["away"])} @ {_nick(record["home"])}', ref('spread', r),
                  _lean_text(record) + (', QB skip' if skipped else ''), either('pick', 'fav_pick', r),
-                 ref('teaser', r), either('result', 'fav_result', r))
+                 ref('kickoff', r), either('result', 'fav_result', r))
         for col, value in enumerate(cells, start=1):
             cell = ws.cell(row, col, value)
             cell.alignment = Alignment(horizontal='left' if col == 1 else 'center', vertical='center')
@@ -973,9 +899,8 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
         # a favorite pick lays points ("Chiefs -3.5"), an underdog pick takes them ("Bills +3")
         ws.conditional_formatting.add(f'D{first_game_row}:D{row - 1}', FormulaRule(
             formula=[f'ISNUMBER(SEARCH(" -",$D{first_game_row}))'], fill=_fill(FAV_FILL), stopIfTrue=True))
-        for col_letter, color in (('D', PICK_FILL), ('E', TEASER_FILL)):
-            ws.conditional_formatting.add(f'{col_letter}{first_game_row}:{col_letter}{row - 1}',
-                                          FormulaRule(formula=[f'LEN(${col_letter}{first_game_row})>0'], fill=_fill(color)))
+        ws.conditional_formatting.add(f'D{first_game_row}:D{row - 1}',
+                                      FormulaRule(formula=[f'LEN($D{first_game_row})>0'], fill=_fill(PICK_FILL)))
     for col_letter in ('F',):
         for outcome, color in (('Win', WIN_FILL), ('Loss', LOSS_FILL)):
             ws.conditional_formatting.add(f'{col_letter}{first_result_row}:{col_letter}{row}',
@@ -997,7 +922,7 @@ def _write_this_week(ws, records, row_of, week, year, settings, teaser_table, fa
 # ---------------------------------------------------------------- the writer
 
 def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=None, spread_fetcher=None, qb_flag_fetcher=None,
-                                  hit_rate_table=None, teaser_table=None, closing_lookup=None, current_week=None, favorite_table=None,
+                                  hit_rate_table=None, closing_lookup=None, current_week=None, favorite_table=None,
                                   locked_games=None):
     """Write projections to <Desktop>/NFL/<year>_nfl_projections.xlsx (nfl_folder), appending to it if it already exists.
 
@@ -1038,7 +963,6 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     settings = _settings_from(old)
     # a table that couldn't be recomputed this run keeps what the workbook already holds
     hit_rate_table = [r for r in (hit_rate_table or []) if r[1] is not None] or _hit_rate_table_from(old)
-    teaser_table = [(label, all_rate, recent) for label, all_rate, _n, recent, _m in (teaser_table or [])] or _teaser_table_from(old)
     favorite_table = [r for r in (favorite_table or []) if r[1] is not None] or _favorite_table_from(old)
 
     def week_value(week):
@@ -1137,7 +1061,7 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
             record['qb_flag'] = fetched_flags[week_number].get((record['home'], record['away']))
 
     # Spreads for games not yet played follow the sportsbook feed until kickoff: a blank spread is filled, and a spread
-    # this code wrote (remembered in Line Written) moves with the line, since a pick or teaser leg holds only at the line
+    # this code wrote (remembered in Line Written) moves with the line, since a pick holds only at the line
     # you can bet.  A spread typed into the sheet (the line you bet) is never replaced.
     spreads_filled = 0
     if spread_fetcher:
@@ -1206,9 +1130,9 @@ def write_projections_spreadsheet(rows, year, output_dir=None, actual_lookup=Non
     this_week.title = SHEET_THIS_WEEK
     log = wb.create_sheet(SHEET_LOG)
     info = wb.create_sheet(SHEET_INFO)
-    _write_info(info, settings, hit_rate_table, teaser_table, int(year), favorite_table)
+    _write_info(info, settings, hit_rate_table, int(year), favorite_table)
     row_of = _write_log(log, records, settings)
-    _write_this_week(this_week, records, row_of, current_week, int(year), settings, teaser_table, favorite_table)
+    _write_this_week(this_week, records, row_of, current_week, int(year), settings, favorite_table)
     wb.active = 0
 
     # write a temporary copy and swap it in, so a failed save never leaves a half-written workbook

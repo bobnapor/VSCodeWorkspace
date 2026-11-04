@@ -135,8 +135,8 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
     logging.info("Projections complete!")
     kickoffs = {(row['home_team'], row['away_team']): (row['kickoff'], game['weekday']) for row, (_, game) in zip(final_rows, games.iterrows())}
 
-    hit_rates, teaser_rates, favorite_rates = None, None, None
-    # The underdog signal and the pick rules (straight underdog picks, favorite picks and Wong teaser legs); see nfl_signal.py
+    hit_rates, favorite_rates = None, None
+    # The underdog signal and the pick rules (straight underdog picks and favorite picks); see nfl_signal.py
     try:
         import nfl_signal
         with run.step(3, "Building play-by-play team ratings for the pick model, and quarterback swings"):
@@ -147,7 +147,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                 lab_table, starters = nfl_qb_swing.with_swings(lab_table, season, week)
             except Exception as e:
                 logging.warning(f"Could not compute quarterback swings ({e}); no pick is skipped for a QB downgrade this run")
-        with run.step(4, "Backtesting the pick model, favorite picks and teaser legs on every season since 1999"):
+        with run.step(4, "Backtesting the pick model and favorite picks on every season since 1999"):
             hit_rates = nfl_signal.backtest_hit_rates(lab_table, season)
             logging.info("Backtest cover rate of the model's side by correction toward the underdog, weeks 5-16, 1999 to date "
                          "(-99 = the correction favors the favorite): "
@@ -155,10 +155,7 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
             favorite_rates = nfl_signal.favorite_backtest(lab_table, season)
             logging.info(f"Favorite picks (night games, lean to the favorite {nfl_signal.FAVORITE_MIN_LEAN:g}+ pts), weeks 5-16: "
                          + "; ".join(f"{label}: {rate:.1%} of {n}" for label, rate, n in favorite_rates if rate is not None))
-            teaser_rates = nfl_signal.teaser_leg_rates(lab_table)
-            logging.info("Wong teaser legs, weeks 5-16: " + "; ".join(
-                f"{label}: {rate:.1%} of {n} since 1999, {recent:.1%} of {m} since 2018" for label, rate, n, recent, m in teaser_rates))
-        with run.step(5, "Finding this week's picks, favorite picks and teaser legs (model corrections, reasons and DraftKings spreads)"):
+        with run.step(5, "Finding this week's picks and favorite picks (model corrections, reasons and DraftKings spreads)"):
             corrections = nfl_signal.week_corrections(season, week, lab_table)
             try:
                 import nfl_reasons
@@ -231,17 +228,6 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
                 if found:
                     logging.info("    Why: " + found[1].replace('\n', '\n         '))
             logging.info(f"{len(favorite_picks)} favorite picks this week")
-            logging.info("\n=== TEASER LEGS: 6-point Wong teasers through 3 and 7 (pair two legs in one teaser) ===")
-            legs = 0
-            for row in final_rows:
-                line = spreads.get((row['home_team'], row['away_team']))
-                leg = nfl_signal.teaser_leg(line, week) if line is not None else None
-                if leg:
-                    side, teased = leg
-                    logging.info(f"{row['home_team'] if side == 'home' else row['away_team']} {teased:+g} "
-                                 f"({row['away_team']} at {row['home_team']}, spread {abs(line):g})")
-                    legs += 1
-            logging.info(f"{legs} teaser legs this week")
         # earlier weeks already in the sheet that predate the signal get their (pre-game) corrections and reasons filled in
         with run.step(6, f"Filling in model corrections and reasons for weeks 1-{week - 1}"):
             regular = lab_table[(lab_table['season'] == season) & (lab_table['game_type'] == 'REG')]
@@ -278,9 +264,9 @@ def main(num_runs=BOOTSTRAP_RUNS, predict_year=None, predict_week=None):
         try:
             output_path, rows_added, actuals_updated, spreads_filled = sheet.write_projections_spreadsheet(
                 final_rows, season, actual_lookup=actual_lookup, spread_fetcher=sheet.fetch_draftkings_spreads,
-                qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates, teaser_table=teaser_rates,
+                qb_flag_fetcher=sheet.fetch_qb_injury_flags, hit_rate_table=hit_rates,
                 favorite_table=favorite_rates, closing_lookup=closing_lookup, current_week=final_rows[0]['week'],
-                locked_games=sheet.shared_games(season, ('spread', 'teaser')),
+                locked_games=sheet.shared_games(season, ('spread',)),
             )
             logging.info(
                 f"Projections spreadsheet updated: {output_path} ({rows_added} games added, "

@@ -35,7 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # (name, script, what it does, the file in the NFL folder it writes that Excel could hold open); the card comes last,
 # as it reads what the flows before it wrote
 STEPS = (
-    ('projections', 'nfl_prod_projections.py', 'spread projections, picks, favorite picks and teaser legs', '{season}_nfl_projections.xlsx'),
+    ('projections', 'nfl_prod_projections.py', 'spread projections, picks and favorite picks', '{season}_nfl_projections.xlsx'),
     ('props', 'nfl_prod_props.py', 'player prop picks', '{season}_nfl_props.xlsx'),
     ('wind', 'nfl_wind_unders.py', 'weather check for totals (wind and rain unders)', '{season}_wind_unders.csv'),
     ('card', 'nfl_share_card.py', "the day's shareable graphic and text list of new picks, and the card record",

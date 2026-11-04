@@ -2,7 +2,7 @@
 
 It reads what the flows wrote (all in the NFL folder on the Desktop, nfl_sheet.nfl_folder), so it shares no logic with
 them and can run on its own at any time:
-  Spreads  NFL/<season>_nfl_projections.xlsx: the week's underdog picks, favorite picks and teaser legs, from the
+  Spreads  NFL/<season>_nfl_projections.xlsx: the week's underdog picks and favorite picks, from the
            Season Log by nfl_sheet's Python versions of the workbook's formulas (checked to agree with them), at the
            spreads the sheet holds, so a line typed into the sheet is the one shown.
   Props    NFL/<season>_nfl_props.xlsx: the picks of the last props run (its This Week tab), only the strongest
@@ -22,7 +22,7 @@ picks in games already under way stay).  From the next day on, the flows keep a 
 projections workbook its spread and model inputs, the weather log its check), so it is tracked at the line that went
 out.  The week's first card says the week's dates; later ones say "New picks" and the day.  With nothing new, no card
 is made.  Until last week's final game is in nflverse's stats (late morning the day after Monday night's game), the
-new week's spread, teaser and prop picks wait for a later card, since they were made without that game.
+new week's spread and prop picks wait for a later card, since they were made without that game.
 
 Every run then rebuilds the card record, NFL\\<season>_nfl_card_record.xlsx (nfl_card_record.py): every pick the cards
 have shown, graded at the card's line, with a Bet? column to set to No for a pick you did not bet, which takes it out
@@ -34,7 +34,7 @@ line): it is saved in NFL\\Cards as '<season> week <N> - <day>.png', with the sa
 into a message or a post, beside it as '<season> week <N> - <day>.txt'.
 
 So that people can choose which picks to follow, each section says how often its kind of pick has hit, and each prop
-its group's rate.  Each section has its own color: spreads blue, teaser legs purple, props yellow, game totals orange.
+its group's rate.  Each section has its own color: spreads blue, props yellow, game totals orange.
 Spread picks of one kind are equally strong: underdog picks hit about the same at every size of the model's lean (54% /
 56.5% / 58% / 51% from the smallest to the largest, p = 0.41), and the weather unders of one flag likewise.  The rates
 come from the projections workbook's Model Info, PROP_GROUPS and, for the weather unders, the research in
@@ -80,7 +80,6 @@ BADGE_EDGE = (64, 84, 120)
 TILE, PANEL, RULE, WATERMARK = 22, 16, 26, 18   # white overlays, by opacity (0-255)
 SECTIONS = (  # key, label, pill color, light text color
     ('spreads', 'SPREADS', (47, 112, 235), (133, 180, 255)),
-    ('teasers', 'TEASER LEGS', (130, 84, 236), (198, 175, 255)),
     ('props', 'PLAYER PROPS', (234, 179, 8), (253, 224, 120)),
     ('totals', 'GAME TOTALS', (234, 88, 12), (253, 186, 116)),
 )
@@ -185,19 +184,13 @@ def bet_at(rate):
     return f'{price:+d} or better' if price is not None else ''
 
 
-def hit_notes(dog_rate, legs, props, totals):
+def hit_notes(dog_rate, props, totals):
     """{section: how often that kind of pick has hit (in the backtests since 1999), and the line and worst price to bet
     it at}: picks of one kind are equally strong (the differences within a kind are chance), so the rates go with the
     sections, and with the group for props, whose rows each carry their own price."""
     notes = {}
     if dog_rate:
         notes['spreads'] = f'Picks hit {dog_rate:.0%} · bet the line shown at {bet_at(dog_rate)}'
-    rates = [leg['confidence'] for leg in legs if leg.get('confidence') is not None]
-    if rates:
-        # both legs must win, so a 2-leg teaser hits about the legs' rate squared (every 2-leg teaser from the same
-        # week's legs since 1999 won 58.0%, 542 of 935; underdog legs 57.6%, against 57.1% / 57.3% squared)
-        both = (sum(rates) / len(rates)) ** 2
-        notes['teasers'] = f'2-leg teaser hits {both:.0%} · bet the lines shown, teaser at {bet_at(both)}'
     if props:
         notes['props'] = 'Bet only at price shown or better'
     kinds = [(label, WEATHER_RATES[flag]) for flag, label in (('UNDER', 'Wind'), ('RAIN', 'Rain'))
@@ -245,23 +238,21 @@ def stale_stats(games, week, season, cache_dir=CACHE_DIR):
 
 
 def spread_picks(path, season, week, kickoffs):
-    """(straight picks, teaser legs, when the lines were taken, how often the underdog picks have hit) for the week, from
-    the projections workbook."""
+    """(straight picks, when the lines were taken, how often the underdog picks have hit) for the week, from the
+    projections workbook."""
     if not os.path.exists(path):
         print(f'Spreads: no projections workbook yet ({path})')
-        return [], [], None, None
+        return [], None, None
     workbook = openpyxl.load_workbook(path)
     log = sheet._find_log_sheet(workbook)
     if log is None:
-        return [], [], None, None
+        return [], None, None
     fields, settings = sheet._field_columns(log), sheet._settings_from(workbook)
-    # how often each kind of pick has hit, from Model Info's tables: the underdog picks' backtest pooled over the sizes of
-    # lean (they do not differ beyond chance), and the teaser legs since 1999
+    # how often the underdog picks have hit, from Model Info's backtest pooled over the sizes of lean (they do not
+    # differ beyond chance)
     dog_rows = [(rate, games) for start, rate, games in sheet._hit_rate_table_from(workbook) if start >= 0 and games]
     dog_rate = sum(rate * games for rate, games in dog_rows) / sum(games for _, games in dog_rows) if dog_rows else None
-    teaser_rates = {('Underdog' if str(label).startswith('Underdog') else 'Favorite'): rate
-                    for label, rate, _since_2018 in sheet._teaser_table_from(workbook)}
-    picks, legs = [], []
+    picks = []
     for r in range(2, log.max_row + 1):
         record = {key: None for key, _ in sheet.LOG_LAYOUT}
         record.update({field: log.cell(r, col).value for field, col in fields.items()})
@@ -278,13 +269,7 @@ def spread_picks(path, season, week, kickoffs):
             picks.append(dict(game, team=home if spread > 0 else away, line=f'+{abs(spread):g}', kind='underdog'))
         elif sheet._is_favorite_pick(record, settings):
             picks.append(dict(game, team=home if spread < 0 else away, line=f'-{abs(spread):g}', kind='favorite'))
-        leg = sheet._teaser_leg(record, settings)
-        if leg:
-            underdog = home if spread > 0 else away
-            favorite = away if underdog == home else home
-            legs.append(dict(game, team=underdog if leg[2] == 'Underdog' else favorite, line=leg[1], kind=leg[2].lower(),
-                             confidence=teaser_rates.get(leg[2])))
-    return picks, legs, file_time(path), dog_rate
+    return picks, file_time(path), dog_rate
 
 
 def prop_picks(path, season, week, kickoffs):
@@ -554,29 +539,6 @@ class Layout:
         rows = (len(picks) + 1) // 2
         return y + rows * height + (rows - 1) * gap
 
-    def teasers(self, legs, y, accent, card):
-        """Chips that wrap: the team's badge, name and teased line, and the kickoff."""
-        s, painter = self.s, self.painter
-        height, gap, diameter = 62 * s, 14 * s, 40 * s
-        font, time_font = self.font('Bold Condensed', 34), self.font('Condensed', 27)
-        x = self.left
-        for leg in legs:
-            name, when = nickname(leg['team']).upper(), clock(leg['kickoff'])
-            width = (11 * s + diameter + 14 * s + painter.width(name, font) + 10 * s + painter.width(leg['line'], font)
-                     + (14 * s + painter.width(when, time_font) if when else 0) + 24 * s)
-            if x > self.left and x + width > self.right:
-                x, y = self.left, y + height + gap
-            self.under(Painter.rounded, (x, y, x + width, y + height), height / 2, TILE)
-            self.over(painter.badge, x + 11 * s + diameter / 2, y + height / 2, diameter, leg['team'])
-            tx = x + 11 * s + diameter + 14 * s
-            self.text(tx, y + height / 2, name, font, WHITE)
-            tx += painter.width(name, font) + 10 * s
-            self.text(tx, y + height / 2, leg['line'], font, accent)
-            if when:
-                self.text(tx + painter.width(leg['line'], font) + 14 * s, y + height / 2, when, time_font, MUTED)
-            x += width + gap
-        return y + height
-
     def props(self, picks, y, accent, card):
         """A panel of rows in the section's order (card_order): the player's team badge, name and bet; the game, then
         how often such picks hit and the worst price to take."""
@@ -711,8 +673,6 @@ def pick_lines(card):
     """[(section title, how often its kind of pick hits, [one line per pick])]: every pick, all the props included."""
     spreads = [f"{nickname(p['team'])} {p['line']} {matchup(p)}{when(p)}"
                + (' (favorite pick)' if p['kind'] == 'favorite' else '') for p in card['spreads']]
-    teasers = [f"{nickname(p['team'])} {p['line']} (from {(p['spread'] if p['team'] == p['home'] else -p['spread']):+g}) "
-               f"{matchup(p)}{when(p)}" for p in card['teasers']]
     props = []
     for p in card['props']:
         team = f" ({label(p['team'])})" if p['team'] else ''
@@ -728,7 +688,7 @@ def pick_lines(card):
         totals.append(f"{nickname(p['away'])} @ {nickname(p['home'])} under{total}{odds}, {p['reason']}{when(p)}")
     captions, notes = card['captions'], card['notes']
     return [(f'{title} ({captions[key]})' if captions.get(key) else title, notes.get(key, ''), lines)
-            for key, title, lines in (('spreads', 'Spreads', spreads), ('teasers', 'Teaser legs', teasers),
+            for key, title, lines in (('spreads', 'Spreads', spreads),
                                       ('props', 'Player props', props), ('totals', 'Game totals', totals)) if lines]
 
 
@@ -750,15 +710,13 @@ def pick_key(kind, pick):
     game = f"{pick['away']}@{pick['home']}"
     if kind == 'spreads':
         return f"spread|{pick['kind']}|{pick['team']}|{game}"
-    if kind == 'teasers':
-        return f"teaser|{pick['team']}|{game}"
     if kind == 'props':
         return f"prop|{pick['player']}|{pick['prop']}|{pick['side']}|{game}"
     return f"total|{game}"
 
 
 def describe(kind, pick):
-    if kind in ('spreads', 'teasers'):
+    if kind == 'spreads':
         return f"{nickname(pick['team'])} {pick['line']}"
     if kind == 'props':
         return f"{pick['player']} {pick['side']}" + ('' if pick['line'] is None else f" {pick['line']:g}") + f" {pick['prop']}"
@@ -823,11 +781,11 @@ def make_files(season=None, show_started=False, note='', handle='', output_dir=N
     log_path = log_path or sheet.share_log_path()
     now = now or pd.Timestamp.now(tz='America/New_York').tz_localize(None)
     week, kickoffs, games = week_games(season)
-    spreads, legs, lines_at, dog_rate = spread_picks(os.path.join(source, f'{season}_nfl_projections.xlsx'), season, week,
-                                                     kickoffs)
+    spreads, lines_at, dog_rate = spread_picks(os.path.join(source, f'{season}_nfl_projections.xlsx'), season, week,
+                                               kickoffs)
     props, props_at = prop_picks(os.path.join(source, f'{season}_nfl_props.xlsx'), season, week, kickoffs)
     totals, checked_at = total_picks(os.path.join(source, f'{season}_wind_unders.csv'), season, week)
-    groups = {'spreads': spreads, 'teasers': legs, 'props': card_props(props), 'totals': totals}
+    groups = {'spreads': spreads, 'props': card_props(props), 'totals': totals}
     groups = {kind: sorted(picks, key=lambda p, kind=kind: card_order(kind, p)) for kind, picks in groups.items()}
     if not show_started:
         upcoming = {kind: [p for p in picks if by_kickoff(p) > now] for kind, picks in groups.items()}
@@ -836,11 +794,11 @@ def make_files(season=None, show_started=False, note='', handle='', output_dir=N
             print(f'Left off {started} pick(s) in games already under way (SHOW_STARTED_GAMES)')
         groups = upcoming
     if stale_stats(games, week, season):
-        held = sum(len(groups[kind]) for kind in ('spreads', 'teasers', 'props'))
+        held = sum(len(groups[kind]) for kind in ('spreads', 'props'))
         if held:
-            print(f'Held back {held} spread, teaser and prop pick(s): last week\'s final game is not in nflverse\'s stats '
+            print(f'Held back {held} spread and prop pick(s): last week\'s final game is not in nflverse\'s stats '
                   f'yet (they come late morning the day after), so these come on a later card')
-        groups.update(spreads=[], teasers=[], props=[])
+        groups.update(spreads=[], props=[])
     log = sheet.read_share_log(log_path)
     week_log = log[(log['season'] == str(season)) & (log['week'] == str(week))]
     today = now.strftime('%Y-%m-%d')
@@ -870,19 +828,18 @@ def make_files(season=None, show_started=False, note='', handle='', output_dir=N
         if replaced.any():
             log.to_csv(log_path, index=False)
         return None, None
-    spreads, legs, props, totals = (fresh[kind] for kind in ('spreads', 'teasers', 'props', 'totals'))
+    spreads, props, totals = (fresh[kind] for kind in ('spreads', 'props', 'totals'))
     days = [kickoff for kickoff, _ in kickoffs.values() if kickoff is not None and not pd.isna(kickoff)]
     checked = checked_at is not None and not pd.isna(checked_at)
     captions = {'spreads': f'lines as of {clock(lines_at)}' if lines_at else '',
-                'teasers': f'{sheet.TEASER_POINTS:g}-point · 2 legs per teaser',
                 'props': f'lines as of {clock(props_at)}' if props_at else '',
                 'totals': f'weather forecast as of {clock(checked_at)}' if checked else ''}
     update = len(earlier) > 0
     card = {'season': season, 'week': week, 'dates': f'New picks · {day}' if update else (date_range(days) if days else ''),
-            'update': update, 'day': day, 'spreads': spreads, 'teasers': legs, 'props': props, 'totals': totals,
-            'captions': captions, 'notes': hit_notes(dog_rate, legs, props, totals)}
-    print(f"Week {week}{', new since the last card' if update else ''}: {len(spreads)} spread pick(s), {len(legs)} teaser "
-          f"leg(s), {len(props)} player prop(s), {len(totals)} game total(s)")
+            'update': update, 'day': day, 'spreads': spreads, 'props': props, 'totals': totals,
+            'captions': captions, 'notes': hit_notes(dog_rate, props, totals)}
+    print(f"Week {week}{', new since the last card' if update else ''}: {len(spreads)} spread pick(s), "
+          f"{len(props)} player prop(s), {len(totals)} game total(s)")
     os.makedirs(folder, exist_ok=True)
     image, text = draw_card(card, note, handle), pick_text(card)
 
@@ -892,7 +849,7 @@ def make_files(season=None, show_started=False, note='', handle='', output_dir=N
     paths = save(lambda path: image.save(path, optimize=True), base + '.png'), save(write_text, base + '.txt')
     clear_day_files(base, keep=paths)
     kept = set(log.loc[(log['season'] == str(season)) & (log['week'] == str(week)), 'key'])
-    shared = {'spreads': spreads, 'teasers': legs, 'props': props, 'totals': totals}
+    shared = {'spreads': spreads, 'props': props, 'totals': totals}
     new = [{'season': str(season), 'week': str(week), 'key': pick_key(kind, p), 'pick': describe(kind, p), 'shown_on': today}
            for kind, picks in shared.items() for p in picks if pick_key(kind, p) not in kept]
     pd.concat([log, pd.DataFrame(new, columns=log.columns)], ignore_index=True).to_csv(log_path, index=False)
