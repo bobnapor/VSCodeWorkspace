@@ -54,6 +54,11 @@ of games), TRAVEL +0.0664, SPOT +0.0697, ALL +0.0671: none adds information the 
 half of games (u above its median 0.3778: median week 4, 32% conference games) is not where the edge is: SEQ's r there
 is +0.060 against +0.078 in the well-connected half.  Chosen: GRAPH, S1 at 2 (496-374, 57.0%, z +2.73; the production
 rule on the same seasons was 433-350, 55.3%).  S1L / S1H at 2: 58.1% / 55.9%.
+
+Step 3 (November 7, 2026, run once, after CHOSEN was committed): GRAPH, S1 at 2 on 2021-2025 went 190-155, 55.1%
+(z +1.00), r +0.045 (t 2.69), +5.1% a bet at the median price, above break-even in all 5 seasons (2021 37-33, 2022
+35-30, 2023 40-27, 2024 47-42, 2025 31-23); the production rule on the same games went 191-150, 56.0%.  Does not pass
+(z < 2, and less profit than the production rule): the production rule stays.  No forward step.
 """
 
 import os
