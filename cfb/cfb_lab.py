@@ -210,10 +210,11 @@ def fbs_tiers(seasons, refresh=False):
                                                               groups['subdivision_id'])}
 
 
-def game_table(seasons=None, refresh=False):
+def game_table(seasons=None, refresh=False, rater=None):
     """One row per game between two FBS teams in `seasons` (default FIRST_SEASON to the current season), regular season
     and bowls (season_type), with home-minus-away (d_) and home-plus-away (s_) ratings, context, closing lines and
-    results.  Seasons from cfb_lines.CFBD_FROM add CollegeFootballData's games (upcoming ones too) and lines."""
+    results.  Seasons from cfb_lines.CFBD_FROM add CollegeFootballData's games (upcoming ones too) and lines.  `rater`
+    replaces rate_teams (same arguments and output; research only)."""
     seasons = list(seasons or range(FIRST_SEASON, current_season() + 1))
     sums, pbp_games = cfb_data.load_team_games(seasons, refresh_latest=refresh)
     schedule = cfb_data.load_schedule(seasons, refresh)
@@ -228,7 +229,7 @@ def game_table(seasons=None, refresh=False):
     schedule = schedule[schedule['start'].notna()]
     tiers = fbs_tiers(seasons, refresh)
     stats = team_stats(sums, pbp_games)
-    ratings = rate_teams(schedule, stats, tiers)
+    ratings = (rater or rate_teams)(schedule, stats, tiers)
     per_team = ratings.merge(add_context(schedule), on=['game_id', 'team_id'], how='left')
     rated = [c for c in per_team.columns if c.startswith('r_')]
     keep = rated + list(CONTEXT)
