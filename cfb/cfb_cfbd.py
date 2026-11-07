@@ -63,6 +63,16 @@ def games(season, refresh=False):
     return frame.drop_duplicates('game_id').sort_values(['start', 'game_id']).reset_index(drop=True)
 
 
+def teams(season, refresh=False):
+    """{ESPN team id: (school, abbreviation, color, alternate color)} for the FBS teams of `season`, for the card's
+    badges."""
+    found = {}
+    for t in _get('/teams/fbs', {'year': season}, f'cfbd_teams_{season}.json', refresh):
+        found[t['id']] = (t.get('school'), t.get('abbreviation') or t.get('school'), t.get('color') or '#475569',
+                          t.get('alternateColor') or '#94A3B8')
+    return found
+
+
 def lines(season, refresh=False):
     """Every book's line for `season`, one row per (game, provider): the home team's spread (negative when it is
     favored), the total and the opening lines, with the game's home team id.  For a game not yet played the spread is

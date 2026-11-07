@@ -1,5 +1,15 @@
 # College football research: current state and handoff
 
+## Daily routine (start here)
+
+**Once a day, around 10 AM Eastern, double-click "CFB daily run" on the Desktop** (separate from "NFL daily run"). It makes the spread picks (about 2 minutes), then saves the day's card of new picks in **CFB\Cards** on the Desktop (`2026 week 11 - Sat Nov 7.png`, and the same picks as text in the `.txt` beside it) and rebuilds the card record. **Share the card if the run made one**; when nothing is new it says "No new picks ... nothing to share today" and makes no card. Close the workbooks in Excel first (the run asks if one is open).
+
+- **Everything lives in the CFB folder on the Desktop:** `2026_cfb_picks.xlsx` (This Week and the Season Log, section 4), `2026_cfb_card_record.xlsx` (every card pick, graded at the card's line, with **Bet?**: set it to No for a pick you did not bet), `Cards`, `data` (`share_card_log.csv`: what each card showed) and `logs`.
+- **Picks go out at the line on the card and stay there.** A pick follows each run until a card shows it; from the next day on (or at kickoff) the picks workbook keeps it as it was shared, so it is graded at that line. Run it as often as you like: a later run on the same day replaces that day's card.
+- **Held back:** a pick whose team's latest game is not in ESPN's play-by-play yet (it comes a day or two after the game) waits for a later card; This Week marks it "Ratings current: No". Saturday's games are usually in by Monday.
+- **Another computer:** run `setup.bat` in this folder once (it installs the packages, records `CFB_CODE` and `CFB_PYTHON`, and puts "CFB daily run" on the Desktop), and copy `cfbd_key.txt` (the CollegeFootballData API key, gitignored) into the code folder.
+- **Options** (from a terminal in `cfb/`): `python cfb_run_all.py card` remakes the card from the workbook the picks last wrote; `picks` or `nocard` run the picks alone. Each step's output goes to `CFB\logs`.
+
 A separate project from the NFL and NBA suites (`../nfl`, `../nba`): its own code (nothing imported from them) and data cache (`cfb/data_cache`, gitignored). Built November 7, 2026, with the same standards: a rule is fixed on discovery seasons, then checked once on seasons no research step has seen, and judged by what it would have returned at real prices. The older scripts in `../college` (Sports-Reference scrapers) are untouched and not used.
 
 ## Where it stands (November 7, 2026)
@@ -72,7 +82,7 @@ Correction versus the cover margin: r = +0.059 (t 3.5). Passes two of the three 
 
 ## 4. The weekly picks (`cfb_prod_picks.py`)
 
-`python cfb_prod_picks.py` from this folder, about 2 minutes. It refreshes this season's play-by-play and CollegeFootballData's games and lines, fits Model B on every regular season from 2006 to last season (alpha 3,000, as in the test), and picks the side the correction favors by 2+ points in every FBS-vs-FBS regular-season game with a line. Each pick is at DraftKings' line (the books' median when DraftKings has none). It writes `<Desktop>\CFB\<season>_cfb_picks.xlsx`:
+`python cfb_prod_picks.py` from this folder (the daily run's first step), about 2 minutes. It refreshes this season's play-by-play and CollegeFootballData's games and lines, fits Model B on every regular season from 2006 to last season (alpha 3,000, as in the test), and picks the side the correction favors by 2+ points in every FBS-vs-FBS regular-season game with a line. Each pick is at DraftKings' line (the books' median when DraftKings has none). It writes `<Desktop>\CFB\<season>_cfb_picks.xlsx`:
 - **This Week:** the picks among the games still to kick off (kickoff, game, pick, lean) and the season's record.
 - **Season Log:** every pick this season with the line it went out at, the closing line, line versus close (positive: the pick beat the closing line, the quickest sign of a real edge), the final margin and the result. A pick follows the latest run until its game kicks off and is then kept, so it is graded at the line the last run before kickoff showed. Weeks played before the first run were filled in at the closing line and are marked so.
 
@@ -80,7 +90,7 @@ The run log goes to `<Desktop>\CFB\logs`. **CollegeFootballData's API key** is i
 
 ## 5. Files (`cfb/`)
 
-`cfb_common.py` (paths, season numbering: a season is the year it starts; the API key), `cfb_data.py` (schedules, groups, the play-by-play reduction), `cfb_cfbd.py` (CollegeFootballData: this season's games and lines), `cfb_lines.py` (closing lines from the multi-book archive to 2025, CollegeFootballData from 2026), `cfb_lab.py` (the research table and walk-forward harness), `cfb_model.py` (Models A and B), `cfb_research_validate.py` (the pre-registered test and the forward test, with their results in its docstring), `cfb_prod_picks.py` (the weekly picks). Run them from this folder with the NFL suite's packages (`../nfl/requirements.txt`).
+`cfb_common.py` (paths, season numbering: a season is the year it starts; the API key; the share log), `cfb_data.py` (schedules, groups, the play-by-play reduction), `cfb_cfbd.py` (CollegeFootballData: this season's games, lines and team colors), `cfb_lines.py` (closing lines from the multi-book archive to 2025, CollegeFootballData from 2026), `cfb_lab.py` (the research table and walk-forward harness), `cfb_model.py` (Models A and B), `cfb_research_validate.py` (the pre-registered test and the forward test, with their results in its docstring), `cfb_prod_picks.py` (the weekly picks), `cfb_share_card.py` (the day's card; its drawing follows `nfl_share_card.py`, copied rather than imported so the suites stay separate), `cfb_card_record.py` (the card record), `cfb_run_all.py`, `run_all.bat`, `desktop_launcher.bat` and `setup.bat` (the daily run), `requirements.txt` (the NFL suite's pinned packages). Run them from this folder.
 
 ## 6. If this is picked up again
 
