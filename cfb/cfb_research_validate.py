@@ -39,7 +39,11 @@ positive in all ten seasons, +0.006 to +0.110); the best spread rule with 60+ pi
 alpha 300, negative in three seasons) and no totals rule with 60+ picks a season beats break-even (best T1 at 3: 51.9%),
 so no totals rule is chosen and the totals' test seasons are left unspent.
 
-Test: not run yet.
+Test (November 7, 2026, run once, after CHOSEN was committed): on 2021-2025 the spread correction kept its information
+(r +0.059, t 3.5), and S1 at 2 went 191-150, 56.0% (z +1.34), +6.9% a bet at the books' median price, about 68 picks a
+season: 2021 36-36, 2022 39-26, 2023 38-22, 2024 43-35, 2025 35-31 (above break-even in 4 of 5).  It does not pass:
+the win rate held from discovery (55.3%) but 341 picks are too few for z >= 2.  Not proposed for betting; the rule is
+the one to track forward (step 4), unchanged.
 """
 
 import math

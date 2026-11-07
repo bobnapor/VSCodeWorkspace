@@ -4,7 +4,11 @@ A separate project from the NFL and NBA suites (`../nfl`, `../nba`): its own cod
 
 ## Where it stands (November 7, 2026)
 
-RESULTS_PLACEHOLDER
+**The spread model has the strongest signal in the project's three sports, but it did not pass its pre-registered test, so there is no college betting run and no card.** It is the one to track forward.
+
+- **Spreads** (section 3): the correction model's information about the cover margin is real and steady: r = +0.068 (t 5.6) on the 2010-2019 discovery seasons, positive in all ten, and +0.059 (t 3.5) on the untouched 2021-2025 test (the NBA's was +0.049, the NFL's about +0.07). The rule frozen on discovery, **bet the side the correction favors by 2+ points**, went 55.3% on discovery (433-350) and **56.0% on the test (191-150), +6.9% a bet at the books' median price**, about 68 picks a season, above break-even in 4 of the 5 test seasons. It fails the bar set in advance only on volume: 341 test picks give z = +1.34 against -110 break-even, and the bar was z >= 2. Pooled with discovery it is 624-500 (55.5%, z about 2.1), but the bar was set on the test alone.
+- **Totals:** the total correction is weak (r = +0.025, t 2.1 on discovery, negative in three seasons) and no totals rule with 60+ picks a season beat break-even (best 51.9%), so none was chosen and the totals' test seasons are unspent.
+- **Model A** (stats only) misses the margin by 13.09 points against the closing spread's 12.33, so the books are better than the ratings alone, as in the NFL and NBA.
 
 ## 1. Data (all free, no API key; `cfb_data.py`, `cfb_lines.py`)
 
@@ -29,13 +33,38 @@ One row per game between two FBS teams (FCS games still feed the ratings), with 
 - **Context:** rest days (capped at 21), games played this season, home field (not at neutral sites), conference game.
 - **Lines and results:** the closing lines (section 1), the margin and total, the cover margin (`margin + home spread`) and the over margin (`points - total`).
 
+**Checks** (the full table, 16,851 FBS games 2004-2026, built in about a minute): 12,488 regular-season games 2006-2025 have a closing spread and a result (about 700-760 a season from 2011; 2-3 books a game and no Pinnacle from 2020); home teams covered 49.4% and overs hit 49.0%; the closing spread misses the margin by 10.9-13.0 points a season. On 2010-2019 the pre-game margin rating correlates +0.65 with the final margin (the closing spread +0.69), points per drive +0.52, EPA per play +0.43. No feature is blank. The 2026 season (502 games played by November 7) has results but no lines (section 5).
+
 ## 3. Spreads and totals (`cfb_model.py`, `cfb_research_validate.py`)
 
 - **Model A** (stats only, ridge): the margin and total from the ratings; a reference, as in the other suites.
 - **Model B** (the correction model, ridge on standardized features): predicts the cover margin and the over margin at the closing line, each season fitted only on earlier seasons from 2006.
 - **The pre-registered validation** (written before any result was seen; the protocol is the docstring of `cfb_research_validate.py`): discovery 2010-2019, untouched test 2021-2025, 2020 (the COVID season) used only to train the test's models; regular season only (bowls are left out, since players sit out for the draft and transfers, which the data does not record). A rule passes only if on the test its picks beat -110 break-even by z >= 2, its correction correlates with the outcome with t >= 2, and it beats break-even in at least 4 of the 5 test seasons: stricter than the NBA's bar, which let through rules worth about nothing at -110.
 
-TEST_PLACEHOLDER
+**Discovery** (2010-2019, 6,640 regular-season games with a closing spread; run once):
+
+| Alpha | Spreads r (t) | Totals r (t) |
+|---|---|---|
+| 300 | +0.059 (4.8) | **+0.025 (2.1)** |
+| 1,000 | +0.065 (5.3) | +0.025 (2.1) |
+| 3,000 | **+0.068 (5.6)** | +0.025 (2.1) |
+| 10,000 | +0.067 (5.4) | +0.023 (1.9) |
+| 30,000 | +0.058 (4.7) | +0.018 (1.5) |
+
+Spread rules at alpha 3,000 (win rate by threshold, t0 / t1 / t2 / t3): S1 (either side) 51.6% / 53.2% / **55.3%** / 63.3% (120 picks, too few); S2 (underdogs) 51.2% / 54.7% / 55.3% / 69.0% (42); S3 (favorites) 51.7% / 51.8% / 54.9% / 60.3% (78). The chosen rule, S1 at 2 (433-350), was committed in `CHOSEN` before the test ran (git history: `bfcc2f8`). Totals: no rule with 60+ picks a season beat break-even.
+
+**Test** (2021-2025, untouched until then, each season by models fitted on 2006 to the season before, 2020 included):
+
+| Season | S1 at 2 |
+|---|---|
+| 2021 | 36-36, 50.0% |
+| 2022 | 39-26, 60.0% |
+| 2023 | 38-22, 63.3% |
+| 2024 | 43-35, 55.1% |
+| 2025 | 35-31, 53.0% |
+| **All** | **191-150, 56.0%** (z +1.34; +6.9% a bet at the median price) |
+
+Correction versus the cover margin: r = +0.059 (t 3.5). Passes two of the three conditions (t >= 2, 4+ of 5 seasons) and fails the third (z >= 2): **not proposed for betting.**
 
 ## 4. Files (`cfb/`)
 
@@ -43,4 +72,6 @@ TEST_PLACEHOLDER
 
 ## 5. If this is picked up again
 
-NEXT_PLACEHOLDER
+- **Track S1 at 2 forward, unchanged** (step 4 of the protocol). 2026 is the next clean season, but it has no lines here yet: the multi-book archive ends with 2025 and ESPN's spread is blank in the 2026 play-by-play. A forward test needs this season's closing lines from another free source (ESPN's odds API by game, as the NBA suite's `nba_lines.py` does, or Action Network's scoreboard, as the NFL suite does), then `python cfb_research_validate.py test` with `TEST` set to 2026. Volume is the obstacle: at 56% a pick, z = 2 against -110 break-even takes about 760 picks, so about six more seasons at 68 a season on top of the 341 so far. Line value against the close (does the line move toward the pick between bet time and kickoff?) would say sooner whether the edge is real, and needs line snapshots through the week.
+- **Totals** have their test seasons unspent; a new idea for them (weather, which the NFL suite found priced at about half its effect; pace mismatches; referee crews) would need its own pre-registered test.
+- **Not tried:** recruiting talent and returning production (sportsdataverse's `cfb_team_talent` and `cfb_returning_production` are parquet-only, which this 32-bit Python cannot read), early-season games where ratings carry over most, bowls (left out), FCS opponents, opening lines (DraftKings, Bovada and ESPN Bet from 2023 only), and Pinnacle against the other books (2010-2019).
