@@ -12,6 +12,7 @@ from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(HERE, 'data_cache')
+CFBD_KEY_FILE = os.path.join(HERE, 'cfbd_key.txt')     # gitignored; holds only the CollegeFootballData API key
 REGULAR_SEASON, POSTSEASON = 2, 3       # ESPN's season_type
 FBS = 'cfb:fbs'                         # the subdivision id in sportsdataverse's cfb_groups
 
@@ -35,6 +36,19 @@ def cfb_folder(*sub):
     path = os.path.join(os.environ.get('CFB_FOLDER') or os.path.join(get_desktop_path(), 'CFB'), *sub)
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def cfbd_key():
+    """The CollegeFootballData API key: the text of cfbd_key.txt beside this file, else CFBD_API_KEY."""
+    if os.path.exists(CFBD_KEY_FILE):
+        with open(CFBD_KEY_FILE, encoding='utf-8') as f:
+            key = f.read().strip()
+        if key:
+            return key
+    key = os.environ.get('CFBD_API_KEY', '').strip()
+    if not key:
+        raise RuntimeError(f'No CollegeFootballData API key: put it in {CFBD_KEY_FILE}')
+    return key
 
 
 def current_season(today=None):

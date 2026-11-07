@@ -4,7 +4,7 @@ A separate project from the NFL and NBA suites (`../nfl`, `../nba`): its own cod
 
 ## Where it stands (November 7, 2026)
 
-**The spread model has the strongest signal in the project's three sports, but it did not pass its pre-registered test, so there is no college betting run and no card.** It is the one to track forward.
+**The spread model has the strongest signal in the project's three sports, but it did not pass its pre-registered test.** On November 7, 2026 the owner chose to treat it as the NFL picks are treated (bet at an honest expectation of about 55% and judge it on its record), so `cfb_prod_picks.py` now makes weekly picks (section 4). The first look at 2026 is poor: 21-26 through week 10 (below).
 
 - **Spreads** (section 3): the correction model's information about the cover margin is real and steady: r = +0.068 (t 5.6) on the 2010-2019 discovery seasons, positive in all ten, and +0.059 (t 3.5) on the untouched 2021-2025 test (the NBA's was +0.049, the NFL's about +0.07). The rule frozen on discovery, **bet the side the correction favors by 2+ points**, went 55.3% on discovery (433-350) and **56.0% on the test (191-150), +6.9% a bet at the books' median price**, about 68 picks a season, above break-even in 4 of the 5 test seasons. It fails the bar set in advance only on volume: 341 test picks give z = +1.34 against -110 break-even, and the bar was z >= 2. Pooled with discovery it is 624-500 (55.5%, z about 2.1), but the bar was set on the test alone.
 - **Totals:** the total correction is weak (r = +0.025, t 2.1 on discovery, negative in three seasons) and no totals rule with 60+ picks a season beat break-even (best 51.9%), so none was chosen and the totals' test seasons are unspent.
@@ -64,14 +64,26 @@ Spread rules at alpha 3,000 (win rate by threshold, t0 / t1 / t2 / t3): S1 (eith
 | 2025 | 35-31, 53.0% |
 | **All** | **191-150, 56.0%** (z +1.34; +6.9% a bet at the median price) |
 
-Correction versus the cover margin: r = +0.059 (t 3.5). Passes two of the three conditions (t >= 2, 4+ of 5 seasons) and fails the third (z >= 2): **not proposed for betting.**
+Correction versus the cover margin: r = +0.059 (t 3.5). Passes two of the three conditions (t >= 2, 4+ of 5 seasons) and fails the third (z >= 2): **not proposed for betting** by the protocol.
 
-## 4. Files (`cfb/`)
+**Forward, 2026** (`python cfb_research_validate.py forward`; first scored November 7, 2026, through week 10, with CollegeFootballData's closing lines, the median of DraftKings and Bovada; models fitted on 2006-2025): the correction kept its information (r = +0.068 on 512 games, t 1.5, about what the history leads to expect), but the rule went **21-26 (44.7%)**: weeks 1-2 0-5, then 21-21. 47 picks say little either way (at a true 55%, a start this bad or worse happens about one season in fifteen); the rule is not changed because of it.
 
-`cfb_common.py` (paths, season numbering: a season is the year it starts), `cfb_data.py` (schedules, groups, the play-by-play reduction), `cfb_lines.py` (closing lines from the multi-book archive), `cfb_lab.py` (the research table and walk-forward harness), `cfb_model.py` (Models A and B), `cfb_research_validate.py` (the pre-registered test, with its results in its docstring). Run them from this folder with the NFL suite's packages (`../nfl/requirements.txt`).
+**The NFL comparison.** The NFL underdog rule went into production on a weaker untouched test (53.7-54.0% on 1999-2005, z about 0.6-0.7) because it held at about 55% in every era with steady information; it was never held to z >= 2. By that standard the college rule (56.0%, z 1.34) qualifies at least as well, which is why the owner chose to bet it the same way.
 
-## 5. If this is picked up again
+## 4. The weekly picks (`cfb_prod_picks.py`)
 
-- **Track S1 at 2 forward, unchanged** (step 4 of the protocol). 2026 is the next clean season, but it has no lines here yet: the multi-book archive ends with 2025 and ESPN's spread is blank in the 2026 play-by-play. A forward test needs this season's closing lines from another free source (ESPN's odds API by game, as the NBA suite's `nba_lines.py` does, or Action Network's scoreboard, as the NFL suite does), then `python cfb_research_validate.py test` with `TEST` set to 2026. Volume is the obstacle: at 56% a pick, z = 2 against -110 break-even takes about 760 picks, so about six more seasons at 68 a season on top of the 341 so far. Line value against the close (does the line move toward the pick between bet time and kickoff?) would say sooner whether the edge is real, and needs line snapshots through the week.
+`python cfb_prod_picks.py` from this folder, about 2 minutes. It refreshes this season's play-by-play and CollegeFootballData's games and lines, fits Model B on every regular season from 2006 to last season (alpha 3,000, as in the test), and picks the side the correction favors by 2+ points in every FBS-vs-FBS regular-season game with a line. Each pick is at DraftKings' line (the books' median when DraftKings has none). It writes `<Desktop>\CFB\<season>_cfb_picks.xlsx`:
+- **This Week:** the picks among the games still to kick off (kickoff, game, pick, lean) and the season's record.
+- **Season Log:** every pick this season with the line it went out at, the closing line, line versus close (positive: the pick beat the closing line, the quickest sign of a real edge), the final margin and the result. A pick follows the latest run until its game kicks off and is then kept, so it is graded at the line the last run before kickoff showed. Weeks played before the first run were filled in at the closing line and are marked so.
+
+The run log goes to `<Desktop>\CFB\logs`. **CollegeFootballData's API key** is in `cfb/cfbd_key.txt` (gitignored; replace the text to change keys); the free tier allows 1,000 calls a month and a run uses 4.
+
+## 5. Files (`cfb/`)
+
+`cfb_common.py` (paths, season numbering: a season is the year it starts; the API key), `cfb_data.py` (schedules, groups, the play-by-play reduction), `cfb_cfbd.py` (CollegeFootballData: this season's games and lines), `cfb_lines.py` (closing lines from the multi-book archive to 2025, CollegeFootballData from 2026), `cfb_lab.py` (the research table and walk-forward harness), `cfb_model.py` (Models A and B), `cfb_research_validate.py` (the pre-registered test and the forward test, with their results in its docstring), `cfb_prod_picks.py` (the weekly picks). Run them from this folder with the NFL suite's packages (`../nfl/requirements.txt`).
+
+## 6. If this is picked up again
+
+- **Track S1 at 2 forward, unchanged.** The weekly run's Season Log is the live record; `python cfb_research_validate.py forward` rescores the season at closing lines. Volume is the obstacle: at 56% a pick, z = 2 against -110 break-even takes about 760 picks, about six more seasons at 68 a season on top of the 341 test picks. Line value against the close (Season Log) will say sooner whether the edge is real.
 - **Totals** have their test seasons unspent; a new idea for them (weather, which the NFL suite found priced at about half its effect; pace mismatches; referee crews) would need its own pre-registered test.
 - **Not tried:** recruiting talent and returning production (sportsdataverse's `cfb_team_talent` and `cfb_returning_production` are parquet-only, which this 32-bit Python cannot read), early-season games where ratings carry over most, bowls (left out), FCS opponents, opening lines (DraftKings, Bovada and ESPN Bet from 2023 only), and Pinnacle against the other books (2010-2019).

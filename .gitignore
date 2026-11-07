@@ -5,3 +5,4 @@ fantasy_football_web/fantasy_football.db
 nfl/data_cache/
 nba/data_cache/
 cfb/data_cache/
+cfb/cfbd_key.txt

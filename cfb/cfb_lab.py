@@ -29,6 +29,7 @@ import os
 import numpy as np
 import pandas as pd
 
+import cfb_cfbd
 import cfb_data
 import cfb_lines
 from cfb_common import CACHE_DIR, FBS, REGULAR_SEASON, current_season
@@ -37,7 +38,7 @@ FIRST_SEASON = cfb_data.FIRST_PBP_SEASON        # ratings warm up on 2004-2005; 
 DECAY, OPP_WEIGHT, PRIOR_GAMES, CARRY = 0.90, 1.0, 3.0, 0.5
 LEAGUE_DECAY = 0.9995
 MAX_REST = 21
-TABLE_VERSION = 1
+TABLE_VERSION = 2
 # (stat, has an allowed side); built from the team-game sums by team_stats
 STATS = (('ppd', True), ('epa', True), ('pass_epa', True), ('rush_epa', True), ('comp_epa', True),
          ('early_epa', True), ('success', True), ('pass_success', True), ('rush_success', True),
@@ -212,10 +213,15 @@ def fbs_tiers(seasons, refresh=False):
 def game_table(seasons=None, refresh=False):
     """One row per game between two FBS teams in `seasons` (default FIRST_SEASON to the current season), regular season
     and bowls (season_type), with home-minus-away (d_) and home-plus-away (s_) ratings, context, closing lines and
-    results."""
+    results.  Seasons from cfb_lines.CFBD_FROM add CollegeFootballData's games (upcoming ones too) and lines."""
     seasons = list(seasons or range(FIRST_SEASON, current_season() + 1))
     sums, pbp_games = cfb_data.load_team_games(seasons, refresh_latest=refresh)
     schedule = cfb_data.load_schedule(seasons, refresh)
+    recent = [s for s in seasons if s >= cfb_lines.CFBD_FROM]
+    if recent:
+        extra = pd.concat([cfb_cfbd.games(s, refresh=refresh and s == seasons[-1]) for s in recent], ignore_index=True)
+        extra = extra[~extra['game_id'].isin(schedule['game_id'])]
+        schedule = pd.concat([schedule, extra[[c for c in schedule.columns if c in extra.columns]]], ignore_index=True)
     schedule = schedule[schedule['home_id'].notna() & schedule['away_id'].notna()].copy()
     schedule['home_id'] = schedule['home_id'].astype(int)
     schedule['away_id'] = schedule['away_id'].astype(int)
@@ -246,12 +252,15 @@ def game_table(seasons=None, refresh=False):
     table = pd.concat([table, pd.DataFrame(derived, index=table.index)], axis=1)
     pbp_cols = pbp_games[['game_id', 'home_id', 'away_id', 'home_score', 'away_score', 'espn_home_spread',
                           'espn_total', 'season']].drop_duplicates('game_id')
-    # the play-by-play's teams decide which side is home for the lines (the schedule agrees except at neutral sites)
-    lines = cfb_lines.closing_lines(pbp_cols)
-    flip = pbp_cols.set_index('game_id')['home_id']
+    lines = cfb_lines.closing_lines(pbp_cols[pbp_cols['season'] < cfb_lines.CFBD_FROM])
+    if recent:
+        lines = pd.concat([lines] + [cfb_lines.current_lines(s, refresh=refresh and s == seasons[-1]) for s in recent],
+                          ignore_index=True)
     table = table.merge(lines.drop(columns=['season']), on='game_id', how='left')
-    swapped = table['game_id'].map(flip).ne(table['home_id']) & table['game_id'].map(flip).notna()
-    for column in ('close_home_spread', 'pinnacle_home_spread', 'open_home_spread', 'espn_home_spread'):
+    # a line is the home team's as its source sees it; flip it where the schedule has the teams the other way round
+    swapped = table['line_home_id'].notna() & table['line_home_id'].ne(table['home_id'])
+    for column in ('close_home_spread', 'pinnacle_home_spread', 'open_home_spread', 'espn_home_spread',
+                   'dk_home_spread'):
         table.loc[swapped, column] = -table.loc[swapped, column]
     final = table['home_score'].notna() & table['away_score'].notna() & table['status'].astype(str).str.contains(
         'FINAL', case=False, na=False)

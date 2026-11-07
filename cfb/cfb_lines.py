@@ -13,36 +13,49 @@ closing_lines() reduces the books to one line per game: the median across sports
 projection sites (consensus, teamrankings, numberfire), which is steadier than any single book.  Pinnacle (2010-2019),
 the sharpest book in the archive, is also kept on its own, and the opening line where a book reported it (DraftKings,
 Bovada and ESPN Bet from 2023).  Lines are as the books stood at kickoff, so they are closing lines.
+
+Seasons from CFBD_FROM on come from CollegeFootballData instead (current_lines): DraftKings and Bovada, keyed by ESPN
+ids, the current line for a game not yet played and the closing line once it has been.
 """
 
 import numpy as np
 import pandas as pd
 
+import cfb_cfbd
 import cfb_data
 
 ODDS_URL = 'https://raw.githubusercontent.com/sportsdataverse/cfbfastR-data/main/betting/csv/cfb_line_odds.csv.gz'
 FIRST_LINES_SEASON = 2006
+CFBD_FROM = 2026                # the archive ends with 2025
+BET_BOOK = 'DraftKings'
 AGGREGATORS = ('consensus', 'teamrankings', 'numberfire')
 SHARP_BOOK = 'PINNACLE'
 OPENING_BOOKS = ('DraftKings', 'Draft Kings', 'Bovada', 'ESPN Bet')
 CLEAR_SPREAD = 3.0              # ESPN's spread at least this far from 0 says which row is the home team's
 MIN_ABBR_SHARE = 0.8
 SPREAD_LIMIT, TOTAL_RANGE = 70, (25, 110)
-LINE_COLUMNS = ['game_id', 'season', 'close_home_spread', 'close_total', 'books_spread', 'books_total',
-                'pinnacle_home_spread', 'pinnacle_total', 'home_spread_odds', 'over_odds', 'open_home_spread',
-                'open_total', 'espn_home_spread', 'espn_total']
+LINE_COLUMNS = ['game_id', 'season', 'line_home_id', 'close_home_spread', 'close_total', 'books_spread', 'books_total',
+                'pinnacle_home_spread', 'pinnacle_total', 'dk_home_spread', 'dk_total', 'home_spread_odds', 'over_odds',
+                'open_home_spread', 'open_total', 'espn_home_spread', 'espn_total']
 
 
 def load_odds(refresh=False):
-    """Every book's line rows (spread, total), one row per side per book."""
+    """Every book's line rows (spread, total), one row per side per book.  Read in chunks with compact types, as the
+    archive's 1.2 million rows do not fit beside the research table in this 32-bit Python otherwise."""
     path = cfb_data.cached_download(ODDS_URL, 'cfb_line_odds.csv.gz', refresh)
-    odds = pd.read_csv(path, low_memory=False, usecols=['game_id', 'season', 'market_type', 'abbr', 'lines', 'odds',
-                                                        'opening_lines', 'opening_odds', 'book'])
-    odds = odds[odds['market_type'].isin(('spread', 'total')) & odds['game_id'].notna() & odds['lines'].notna()]
+    columns = ['game_id', 'season', 'market_type', 'abbr', 'lines', 'odds', 'opening_lines', 'book']
+    dtypes = {'game_id': 'float64', 'season': 'float32', 'market_type': 'category', 'abbr': 'category',
+              'lines': 'float32', 'odds': 'float32', 'opening_lines': 'float32', 'book': 'category'}
+    parts = []
+    for chunk in pd.read_csv(path, usecols=columns, dtype=dtypes, chunksize=200000):
+        chunk = chunk[chunk['market_type'].isin(('spread', 'total')) & chunk['game_id'].notna()
+                      & chunk['lines'].notna()]
+        parts.append(chunk.astype({'market_type': str, 'abbr': str, 'book': str}))
+    odds = pd.concat(parts, ignore_index=True)
     odds['game_id'] = odds['game_id'].astype('int64')
     odds['season'] = odds['season'].astype(int)
-    odds['abbr'] = odds['abbr'].astype(str).str.strip()
-    odds['book'] = odds['book'].astype(str).str.strip()
+    odds['abbr'] = odds['abbr'].str.strip()
+    odds['book'] = odds['book'].str.strip()
     return odds[~odds['book'].str.lower().isin(AGGREGATORS)]
 
 
@@ -103,12 +116,33 @@ def closing_lines(espn_games, refresh=False):
     lines = sp.join(tt, how='outer').join(pin_sp).join(pin_tt).reset_index()
     seasons = odds.drop_duplicates('game_id').set_index('game_id')['season']
     lines['season'] = lines['season'].fillna(lines['game_id'].map(seasons))
-    lines = lines.merge(espn_games[['game_id', 'espn_home_spread', 'espn_total']], on='game_id', how='left')
+    lines = lines.merge(espn_games[['game_id', 'home_id', 'espn_home_spread', 'espn_total']], on='game_id', how='left')
+    lines = lines.rename(columns={'home_id': 'line_home_id'})
     for column in ('close_home_spread', 'open_home_spread', 'pinnacle_home_spread'):
         lines[column] = (lines[column] * 2).round() / 2      # medians of an even count land on quarter points
     for column in ('close_total', 'open_total', 'pinnacle_total'):
         lines[column] = (lines[column] * 2).round() / 2
     return lines.reindex(columns=LINE_COLUMNS)
+
+
+def current_lines(season, refresh=False):
+    """One row per game of `season` with a line at CollegeFootballData, in closing_lines' columns: the median across its
+    books, DraftKings' own line, the median opening line, and the team the books treat as home (line_home_id)."""
+    books = cfb_cfbd.lines(season, refresh)
+    if books.empty:
+        return pd.DataFrame(columns=LINE_COLUMNS)
+    books = books[books['home_spread'].abs().le(SPREAD_LIMIT) | books['home_spread'].isna()]
+    g = books.groupby('game_id')
+    lines = pd.DataFrame({
+        'season': g['season'].first(), 'line_home_id': g['line_home_id'].first(),
+        'close_home_spread': g['home_spread'].median(), 'books_spread': g['home_spread'].count(),
+        'close_total': g['total'].median(), 'books_total': g['total'].count(),
+        'open_home_spread': g['open_home_spread'].median(), 'open_total': g['open_total'].median()})
+    dk = books[books['provider'] == BET_BOOK].drop_duplicates('game_id').set_index('game_id')
+    lines['dk_home_spread'], lines['dk_total'] = dk['home_spread'], dk['total']
+    for column in ('close_home_spread', 'open_home_spread', 'close_total', 'open_total'):
+        lines[column] = (lines[column] * 2).round() / 2
+    return lines.reset_index().reindex(columns=LINE_COLUMNS)
 
 
 def coverage(lines):

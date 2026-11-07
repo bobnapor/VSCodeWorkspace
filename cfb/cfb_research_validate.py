@@ -31,6 +31,8 @@ Model A (the stats-only margin and total projections) is reported against the cl
 
     python cfb_research_validate.py            discovery (steps 1-2)
     python cfb_research_validate.py test       the untouched test of CHOSEN (step 3)
+    python cfb_research_validate.py forward    CHOSEN on the 2026 games played so far (step 4; lines from
+                                               CollegeFootballData, the median of DraftKings and Bovada)
 
 Results.  Discovery (November 7, 2026, run once): Model A misses the margin by 13.09 points (closing spread 12.33) and the
 total by 13.70 (closing total 13.15).  The spread correction correlates +0.068 with the cover margin (t 5.6, alpha 3000,
@@ -57,6 +59,7 @@ import cfb_model
 
 DISCOVERY = (2010, 2019)
 TEST = (2021, 2025)
+FORWARD = 2026
 ALPHAS = (300, 1000, 3000, 10000, 30000)
 THRESHOLDS = (0.0, 1.0, 2.0, 3.0, 4.0, 5.0)
 MIN_PICKS_PER_SEASON = 60
@@ -205,10 +208,33 @@ def test(table):
     return 0
 
 
+def forward(table):
+    """Step 4: CHOSEN on the FORWARD season's finished regular-season games, by models fitted on 2006 to the season
+    before, as in the test."""
+    rows = table['regular'] & table['season'].between(cfb_model.FIRST_LINES_SEASON, FORWARD)
+    for market, (alpha, family, threshold) in CHOSEN.items():
+        kind = 'cover' if market == 'spreads' else 'over'
+        s = cfb_model.scored(table, kind, alpha, FORWARD, FORWARD, rows=rows)
+        s = s[s[kind].notna()]
+        r, t = correlation(s['pred'], s[kind])
+        won, taken = picks(s, market, family, threshold)
+        wins, losses, rate, z = record(won)
+        print(f'\n== {market}: {family} at {threshold:g}, alpha {alpha}, forward {FORWARD} '
+              f'({len(s)} games played with a line) ==')
+        print(f'  correction vs outcome: r = {r:+.4f} (t {t:+.2f})')
+        print(f'  picks: {wins}-{losses}, {rate:.1%} (z {z:+.2f} against break-even)')
+        for week, g in won.groupby(taken['week']):
+            ww, wl, _, _ = record(g)
+            print(f'    week {int(week)}: {ww}-{wl}')
+    return 0
+
+
 def main(argv):
     table = cfb_lab.default_table()
     if argv and argv[0] == 'test':
         return test(table)
+    if argv and argv[0] == 'forward':
+        return forward(table)
     discovery(table)
     return 0
 
