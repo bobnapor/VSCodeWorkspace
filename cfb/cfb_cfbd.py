@@ -8,6 +8,7 @@ CollegeFootballData's game ids are ESPN's, and its lines name both teams by ESPN
 
 import json
 import os
+import time
 
 import pandas as pd
 import requests
@@ -15,6 +16,7 @@ import requests
 from cfb_common import CACHE_DIR, POSTSEASON, REGULAR_SEASON, cfbd_key
 
 BASE_URL = 'https://api.collegefootballdata.com'
+RETRIES = 4
 SEASON_TYPES = {'regular': REGULAR_SEASON, 'postseason': POSTSEASON}
 
 
@@ -25,8 +27,13 @@ def _get(path, params, cache_name, refresh=False):
     cache = os.path.join(CACHE_DIR, cache_name)
     if refresh or not os.path.exists(cache):
         try:
-            response = requests.get(BASE_URL + path, params=params, timeout=60,
-                                    headers={'Authorization': f'Bearer {cfbd_key()}', 'Accept': 'application/json'})
+            for attempt in range(RETRIES):
+                response = requests.get(BASE_URL + path, params=params, timeout=60,
+                                        headers={'Authorization': f'Bearer {cfbd_key()}',
+                                                 'Accept': 'application/json'})
+                if response.status_code < 500 or attempt == RETRIES - 1:
+                    break
+                time.sleep(5 * (attempt + 1))       # the API sheds load with brief 5xx errors
             response.raise_for_status()
             data = response.json()
         except (requests.RequestException, ValueError):

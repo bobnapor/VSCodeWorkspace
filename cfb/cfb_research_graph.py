@@ -47,6 +47,13 @@ Results.  Step 1 (November 7, 2026, run once): Model A's miss of the final margi
 line 12.330): production ratings 13.086; graph lam 2 / 5 / 10 with carry 0.4: 13.333 / 13.361 / 13.459, with carry
 0.7: 13.018 / 13.051 / 13.221.  TUNED = (2, 0.7), the only settings beating the production ratings: last season
 matters more than the in-season prior.  The graph ratings lose most in weeks 1-2 (15.1 against 14.1 at carry 0.4).
+
+Step 2 (November 7, 2026, run once): correction vs cover, 2010-2019: SEQ r +0.0683 (t 5.58), GRAPH +0.0707 (5.78),
+BOTH +0.0697; BASE = GRAPH.  Context families added to it: PRIOR +0.0707 (no gain; returning production covers 59%
+of games), TRAVEL +0.0664, SPOT +0.0697, ALL +0.0671: none adds information the closing line lacks.  The thin-graph
+half of games (u above its median 0.3778: median week 4, 32% conference games) is not where the edge is: SEQ's r there
+is +0.060 against +0.078 in the well-connected half.  Chosen: GRAPH, S1 at 2 (496-374, 57.0%, z +2.73; the production
+rule on the same seasons was 433-350, 55.3%).  S1L / S1H at 2: 58.1% / 55.9%.
 """
 
 import os
@@ -69,8 +76,8 @@ FIXED = 1e-3                    # the league mean and home field are all but unp
 GRAPH_VERSION = 1
 # filled in after step 1 and step 2, before the test
 TUNED = (2.0, 0.7)              # step 1, November 7, 2026
-U_SPLIT = None                  # median u of the discovery games
-CHOSEN = None                   # (feature set, alpha, family, threshold)
+U_SPLIT = 0.3778                # step 2, November 7, 2026
+CHOSEN = ('GRAPH', 3000, 'S1', 2.0)   # step 2, frozen before the test
 
 
 # ---------------------------------------------------------------- the graph ratings
