@@ -20,8 +20,12 @@ discovery 2010-2019, 2020 for training only, regular season, FBS against FBS, br
      2004) misses the final margin by the least on 2010-2019.  Reported beside the production ratings' miss.
   2. Discovery, Model B (the correction against the closing spread) on 2010-2019 with three feature sets: SEQ (the
      production ratings), GRAPH (the graph ratings in their place), BOTH (both).  Each set's alpha is the one of
-     cfb_research_validate.ALPHAS correlating best with the cover margin.  A set other than SEQ goes on only if its r
-     beats SEQ's; the best such set is chosen.  Then its rules are scored, the original families S1-S3 plus
+     cfb_research_validate.ALPHAS correlating best with the cover margin.  The best of the three by r is the BASE, and
+     each context family of cfb_research_context (added November 7, 2026, after step 1 and before step 2 had run) is
+     scored added to it: BASE+PRIOR (recruiting talent, returning production), BASE+TRAVEL (distance, time zones,
+     body clock, altitude), BASE+SPOT (lookahead, letdown, off an upset), BASE+ALL.  A set other than SEQ goes on
+     only if its r beats SEQ's; the best such set is chosen.  Then its rules are scored, the original families S1-S3
+     plus
         S1L / S1H: S1 (the side the correction favors by >= t) in games with u at or below / above U_SPLIT, the
                    median u of the discovery games (fixed there and used unchanged later),
      at each of cfb_research_validate.THRESHOLDS, and the rule with the largest z against break-even and at least 60
@@ -38,10 +42,16 @@ discovery 2010-2019, 2020 for training only, regular season, FBS against FBS, br
     python cfb_research_graph.py discovery    step 2
     python cfb_research_graph.py test         step 3
     python cfb_research_graph.py forward      step 4
+
+Results.  Step 1 (November 7, 2026, run once): Model A's miss of the final margin, 2010-2019 (6,640 games; closing
+line 12.330): production ratings 13.086; graph lam 2 / 5 / 10 with carry 0.4: 13.333 / 13.361 / 13.459, with carry
+0.7: 13.018 / 13.051 / 13.221.  TUNED = (2, 0.7), the only settings beating the production ratings: last season
+matters more than the in-season prior.  The graph ratings lose most in weeks 1-2 (15.1 against 14.1 at carry 0.4).
 """
 
 import os
 import sys
+import time
 
 import numpy as np
 import pandas as pd
@@ -49,6 +59,7 @@ from scipy.linalg import cho_factor, cho_solve
 
 import cfb_lab
 import cfb_model
+import cfb_research_context as context
 import cfb_research_validate as val
 from cfb_common import CACHE_DIR
 
@@ -57,7 +68,7 @@ CARRIES = (0.4, 0.7)
 FIXED = 1e-3                    # the league mean and home field are all but unpenalized
 GRAPH_VERSION = 1
 # filled in after step 1 and step 2, before the test
-TUNED = None                    # (lam, carry)
+TUNED = (2.0, 0.7)              # step 1, November 7, 2026
 U_SPLIT = None                  # median u of the discovery games
 CHOSEN = None                   # (feature set, alpha, family, threshold)
 
@@ -83,6 +94,7 @@ class GraphRater:
         games = games.assign(neutral=neutral)
         final, final_tier, league = {}, {}, np.zeros((2, k))         # last season: team -> (offense, defense)
         out = []
+        started = time.time()
         for season, g in games.groupby('season', sort=True):
             teams = sorted(set(g['home_id']) | set(g['away_id']))
             T = len(teams)
@@ -141,6 +153,7 @@ class GraphRater:
             final = {t: (X[i].copy(), X[T + i].copy()) for t, i in idx.items()}
             final_tier = {t: tiers.get((season, t), False) for t in idx}
             league = X[[MU, HF]].copy()
+            print(f'    rated {season} ({T} teams, {time.time() - started:.0f}s)', flush=True)
         rows = []
         for game_id, team, gp_, own, alw in out:
             row = {'game_id': game_id, 'team_id': team, 'gp': gp_}
@@ -171,14 +184,21 @@ OTHER_FEATURES = [f for f in cfb_model.SPREAD_FEATURES if f not in RATING_FEATUR
 FEATURE_SETS = {'SEQ': cfb_model.SPREAD_FEATURES,
                 'GRAPH': ['g' + f for f in RATING_FEATURES] + OTHER_FEATURES,
                 'BOTH': cfb_model.SPREAD_FEATURES + ['g' + f for f in RATING_FEATURES]}
+FAMILIES = dict(context.FAMILIES, ALL=[c for f in context.FAMILIES.values() for c in f])
+
+
+def features_of(name):
+    """'BOTH+PRIOR' -> BOTH's features and the PRIOR family's."""
+    base, _, family = name.partition('+')
+    return FEATURE_SETS[base] + (FAMILIES[family] if family else [])
 
 
 def combined(lam, carry):
-    """The production table with the graph ratings beside it (gd_*) and u."""
+    """The production table with the graph ratings beside it (gd_*), u and the context features."""
     table = cfb_lab.default_table()
     graph = graph_table(lam, carry)[['game_id', 'u'] + RATING_FEATURES]
     graph = graph.rename(columns={f: 'g' + f for f in RATING_FEATURES})
-    return table.merge(graph, on='game_id', how='left')
+    return context.add_features(table.merge(graph, on='game_id', how='left'))
 
 
 def picks(scored, family, threshold):
@@ -221,19 +241,28 @@ def discovery():
     table = combined(*TUNED)
     rows = val.regular(table) & (table['season'] != 2020)
     print(f'== Step 2: Model B on {val.DISCOVERY[0]}-{val.DISCOVERY[1]} (graph lam {TUNED[0]:g}, carry {TUNED[1]:g}) ==')
+    found = context.coverage(table[table['season'].between(*val.DISCOVERY)]).mean()
+    print('  context coverage, discovery games: ' + ', '.join(f'{c[2:]} {v:.0%}' for c, v in found.items()))
     runs = {}
-    for name, features in FEATURE_SETS.items():
+
+    def run(name):
         best = None
         for alpha in val.ALPHAS:
-            s = cfb_model.scored(table, 'cover', alpha, *val.DISCOVERY, features=features, rows=rows)
+            s = cfb_model.scored(table, 'cover', alpha, *val.DISCOVERY, features=features_of(name), rows=rows)
             s = s[s['cover'].notna()]
             r, t = val.correlation(s['pred'], s['cover'])
             if best is None or r > best[0]:
                 best = (r, t, alpha, s)
         r, t, alpha, s = best
         by_season = ' '.join(f'{val.correlation(x["pred"], x["cover"])[0]:+.3f}' for _, x in s.groupby('season'))
-        print(f'  {name:5}: r {r:+.4f} (t {t:+.2f}) at alpha {alpha}; by season {by_season}')
+        print(f'  {name:12}: r {r:+.4f} (t {t:+.2f}) at alpha {alpha}; by season {by_season}', flush=True)
         runs[name] = best
+    for name in FEATURE_SETS:
+        run(name)
+    base = max(FEATURE_SETS, key=lambda n: runs[n][0])
+    print(f'  BASE = {base}')
+    for family in FAMILIES:
+        run(f'{base}+{family}')
     split = float(runs['SEQ'][3]['u'].median())
     print(f'\n  u (the margin ratings\' difference, standard error units): median {split:.4f} -> U_SPLIT')
     seq = runs['SEQ'][3]
@@ -243,9 +272,9 @@ def discovery():
         w, l, rate, _ = val.record(won)
         print(f'  SEQ, {label}: r {r:+.4f} (t {t:+.2f}); S1 at 2 {w}-{l} {rate:.1%}; weeks {part["week"].median():.0f} '
               f'median; conference games {part["conference"].mean():.0%}')
-    candidates = [n for n in ('GRAPH', 'BOTH') if runs[n][0] > runs['SEQ'][0]]
+    candidates = [n for n in runs if n != 'SEQ' and runs[n][0] > runs['SEQ'][0]]
     if not candidates:
-        print('\n  No graph set beats SEQ on discovery: nothing goes to the test.')
+        print('\n  No set beats SEQ on discovery: nothing goes to the test.')
         return 0
     name = max(candidates, key=lambda n: runs[n][0])
     r, t, alpha, s = runs[name]
@@ -274,7 +303,7 @@ def evaluate(first, last, label, rows_fn):
     name, alpha, family, threshold = CHOSEN
     table = combined(*TUNED)
     rows = rows_fn(table)
-    s = cfb_model.scored(table, 'cover', alpha, first, last, features=FEATURE_SETS[name], rows=rows)
+    s = cfb_model.scored(table, 'cover', alpha, first, last, features=features_of(name), rows=rows)
     s = s[s['cover'].notna()]
     r, t = val.correlation(s['pred'], s['cover'])
     won, taken = picks(s, family, threshold)
