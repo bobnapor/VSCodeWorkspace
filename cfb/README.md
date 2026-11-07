@@ -10,7 +10,7 @@
 - **Another computer:** run `setup.bat` in this folder once (it installs the packages, records `CFB_CODE` and `CFB_PYTHON`, and puts "CFB daily run" on the Desktop), and copy `cfbd_key.txt` (the CollegeFootballData API key, gitignored) into the code folder.
 - **Options** (from a terminal in `cfb/`): `python cfb_run_all.py card` remakes the card from the workbook the picks last wrote; `picks` or `nocard` run the picks alone. Each step's output goes to `CFB\logs`.
 
-A separate project from the NFL and NBA suites (`../nfl`, `../nba`): its own code (nothing imported from them) and data cache (`cfb/data_cache`, gitignored). Built November 7, 2026, with the same standards: a rule is fixed on discovery seasons, then checked once on seasons no research step has seen, and judged by what it would have returned at real prices. The older scripts in `../college` (Sports-Reference scrapers) are untouched and not used.
+A separate project from the NFL and NBA suites (`../nfl`, `../nba`): its own code (nothing imported from them; the one shared piece is the share cards' look, `../shared/card_design.py`) and data cache (`cfb/data_cache`, gitignored). Built November 7, 2026, with the same standards: a rule is fixed on discovery seasons, then checked once on seasons no research step has seen, and judged by what it would have returned at real prices. The older scripts in `../college` (Sports-Reference scrapers) are untouched and not used.
 
 ## Where it stands (November 7, 2026)
 
@@ -90,7 +90,7 @@ The run log goes to `<Desktop>\CFB\logs`. **CollegeFootballData's API key** is i
 
 ## 5. Files (`cfb/`)
 
-`cfb_common.py` (paths, season numbering: a season is the year it starts; the API key; the share log), `cfb_data.py` (schedules, groups, the play-by-play reduction), `cfb_cfbd.py` (CollegeFootballData: this season's games, lines and team colors), `cfb_lines.py` (closing lines from the multi-book archive to 2025, CollegeFootballData from 2026), `cfb_lab.py` (the research table and walk-forward harness), `cfb_model.py` (Models A and B), `cfb_research_validate.py` (the pre-registered test and the forward test, with their results in its docstring), `cfb_prod_picks.py` (the weekly picks), `cfb_share_card.py` (the day's card; its drawing follows `nfl_share_card.py`, copied rather than imported so the suites stay separate), `cfb_card_record.py` (the card record), `cfb_run_all.py`, `run_all.bat`, `desktop_launcher.bat` and `setup.bat` (the daily run), `requirements.txt` (the NFL suite's pinned packages). Run them from this folder.
+`cfb_common.py` (paths, season numbering: a season is the year it starts; the API key; the share log), `cfb_data.py` (schedules, groups, the play-by-play reduction), `cfb_cfbd.py` (CollegeFootballData: this season's games, lines and team colors), `cfb_lines.py` (closing lines from the multi-book archive to 2025, CollegeFootballData from 2026), `cfb_lab.py` (the research table and walk-forward harness), `cfb_model.py` (Models A and B), `cfb_research_validate.py` (the pre-registered test and the forward test, with their results in its docstring), `cfb_prod_picks.py` (the weekly picks), `cfb_share_card.py` (the day's card, what it shows; how it looks is `../shared/card_design.py`, shared with the NFL card), `cfb_card_record.py` (the card record), `cfb_run_all.py`, `run_all.bat`, `desktop_launcher.bat` and `setup.bat` (the daily run), `requirements.txt` (the NFL suite's pinned packages). Run them from this folder.
 
 ## 6. If this is picked up again
 
