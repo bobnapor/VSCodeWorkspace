@@ -43,6 +43,10 @@ OVER_LATE_HOURS = 48
 # an absence by his old role: receiving forecasts for such players ran 20-30% high (more after longer absences), and
 # the over rule's picks on them went 28-35 against 757-513 for its other picks.
 RETURNER_MISSED, RETURNER_FIRST_WEEK = 3, 2
+# The debut skip (adopted November 8, 2026): no pick of either side for a player with no NFL game in the data, from week
+# DEBUT_FIRST_WEEK on.  The model has no numbers of his own (Jordyn Tyson, 2026 week 9, back from injury), and the history
+# cannot vouch for such picks: 4 in 2024-2026 (1-3).  Week 1 is exempt: week-1 rookies' unders went 40-31 (56.3%).
+DEBUT_FIRST_WEEK = 2
 
 MIN_EDGE = 0.03         # the price shown is the worst one at which a bet still returns 3% on average
 PRIOR_GAMES = 200       # shrinkage of a market's backtest win rate toward its line group's (line_win_rates)
@@ -105,6 +109,12 @@ def returner_skip(missed, week):
     since his last game, in week RETURNER_FIRST_WEEK or later (unknown, e.g. his first game in the data: no skip)."""
     return (missed is not None and not pd.isna(missed) and missed >= RETURNER_MISSED
             and week is not None and week >= RETURNER_FIRST_WEEK)
+
+
+def debut_skip(n_games, week):
+    """Whether a player would make his NFL debut (no earlier game in the data) in week DEBUT_FIRST_WEEK or later."""
+    return (n_games is not None and not pd.isna(n_games) and n_games == 0
+            and week is not None and week >= DEBUT_FIRST_WEEK)
 
 
 def over_picks(scored):

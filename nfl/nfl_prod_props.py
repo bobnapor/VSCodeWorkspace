@@ -54,6 +54,9 @@ RULE_LINES = (
     f"(week {ps.RETURNER_FIRST_WEEK} on).  The models build his numbers from his last games played, however long ago, so "
     "after an absence they forecast his old role: receiving forecasts for such players ran 20-30% high, and their overs "
     "went 28-35 (44%) in the backtest.",
+    f"Debut skip: no pick of either side for a player making his NFL debut in week {ps.DEBUT_FIRST_WEEK} or later "
+    "(often back from injury): the model has no numbers of his own, and the backtest has almost no such picks (1-3 in "
+    "2024-2026).  Week 1 rookies are kept: their unders went 40-31.",
     f"Under rule: bet the Under when the full model (final injury report, closing game lines) gives it {ps.MIN_CHANCE:.0%} "
     "or more, in " + ', '.join(pl.MARKETS[m][1] for m in ps.PICK_MARKETS)
     + f".  It holds at closing lines, so unders are picked only within {ps.UNDER_WINDOW_HOURS} hours of their game's "
@@ -351,7 +354,7 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
         waiting = [kickoffs[g][1] for g, hours in hours_left.items() if hours > ps.UNDER_WINDOW_HOURS]
         reported = final_reports(injuries, week_games, season, week)
         no_report = set()
-        picks, returners = [], []
+        picks, returners, debuts = [], [], []
         for side in sides:
             v = variants[side]
             week_fc = week_forecasts(v['frame'], v['models'], season, week)
@@ -359,6 +362,10 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
             side_picks = []
             for r in scored.itertuples() if len(scored) else []:
                 if qualifies(side, r, week):
+                    row = week_fc[(r.gsis_id, r.game_id, r.market)][1]
+                    if ps.debut_skip(row.get('n_games'), week):
+                        debuts.append((r, row['team']))
+                        continue
                     if side == 'Under' and hours_left[r.game_id] > ps.UNDER_WINDOW_HOURS:
                         continue
                     if side == 'Under' and r.game_id not in reported:
@@ -407,6 +414,10 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                     logging.info(f"{gone} more overs reach {ps.OVER_MIN_CHANCE:.0%} but their line has already moved "
                                  f"from its opener, so the edge has been bet away; run earlier in the week to catch them.")
             picks += side_picks
+        for r, team in debuts:
+            logging.info(f"Skipped (NFL debut): {r.player_name} ({team}) {r.side} {float(r.line):g} "
+                         f"{pl.MARKETS[r.market][1]} - {kickoffs[r.game_id][1]}: no NFL games yet, so the model has no "
+                         f"numbers of his own and the history has almost no such picks to support it")
         if len(lines):
             logging.info("DraftKings' prices are not in the feed: take a pick only at its Bet At price or better.")
 
@@ -446,6 +457,9 @@ def main(predict_year=None, predict_week=None, output_dir=None, log_dir=None, si
                 notes.append("Skipped (back from absence, the returner skip): " + '; '.join(
                     f"{r.player_name} Over {float(r.line):g} {pl.MARKETS[r.market][1]} (his team has played {missed:g} "
                     f"games since his last)" for r, missed, _ in returners) + ".")
+            if debuts:
+                notes.append("Skipped (NFL debut, no games of his own to forecast from): " + '; '.join(
+                    f"{r.player_name} {r.side} {float(r.line):g} {pl.MARKETS[r.market][1]}" for r, _ in debuts) + ".")
             under_empty = None
             if 'Under' in sides and (waiting or no_report):
                 later = []
